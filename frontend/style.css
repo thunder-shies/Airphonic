@@ -1,0 +1,17 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background-color: black;
+}
+
+canvas {
+  display: block;
+  position: absolute;
+}
+
+#p5Canvas {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+}

@@ -24,3 +24,5 @@ dist-ssr
 *.sw?
 /.qodo
 backend/.env
+.qodo
+/frontend-old
