@@ -133,16 +133,6 @@ function draw() {
   image(mountainBuffer, 0, 0);
   image(circularBuffer, 0, 0);
 
-  // Display air quality information
-  const pollutants = {
-    "CO": 0,
-    "O₃": 0,
-    "NO₂": 0,
-    "SO₂": 0,
-    "PM₂.₅": 0,
-    "PM₁₀": 0
-  };
-
   const pollutantLvls = {
     pm25: {
       name: 'PM2.5',
@@ -763,17 +753,26 @@ function drawCircularVis() {
   const bassEnergy = fft.getEnergy(20, 200);
   const isHighEnergy = bassEnergy > CONFIG.highEnergyThreshold;
 
+  // Get AQI color for visualization
+  const aqiValue = aqData["AQI (US)"];
+  const aqiColor = getAQIColor(aqiValue);
+
+  // Extract HSB values from the color for use in visualization
+  const aqiHue = hue(aqiColor);
+  const aqiSaturation = saturation(aqiColor);
+  const aqiBrightness = brightness(aqiColor);
+
   circularBuffer.push();
   circularBuffer.translate(width / 2, height / 2);
 
-  drawSpectrumHistory(circularBuffer, spectrum);
-  drawCenterCircle(circularBuffer);
-  updateAndDrawParticles(circularBuffer, isHighEnergy);
+  drawSpectrumHistory(circularBuffer, spectrum, aqiHue, aqiSaturation);
+  drawCenterCircle(circularBuffer, aqiHue, aqiSaturation, aqiBrightness);
+  updateAndDrawParticles(circularBuffer, isHighEnergy, aqiHue);
 
   circularBuffer.pop();
 }
 
-function drawSpectrumHistory(buffer, spectrum) {
+function drawSpectrumHistory(buffer, spectrum, aqiHue, aqiSaturation) {
   buffer.blendMode(ADD);
 
   // Add current spectrum to history
@@ -789,7 +788,7 @@ function drawSpectrumHistory(buffer, spectrum) {
   buffer.strokeWeight(2);
 
   for (let i = 0; i < spectrumHist.length; i++) {
-    drawSpectrumLayer(buffer, spectrumHist[i], i, numBands);
+    drawSpectrumLayer(buffer, spectrumHist[i], i, numBands, aqiHue, aqiSaturation);
   }
 
   buffer.blendMode(BLEND);
@@ -809,20 +808,19 @@ function calculateSpectrumLayer(spectrum) {
   return layer;
 }
 
-function drawSpectrumLayer(buffer, layer, index, numBands) {
+function drawSpectrumLayer(buffer, layer, index, numBands, aqiHue, aqiSaturation) {
   // Calculate visual properties
   const layerRatio = index / spectrumHist.length;
   const brightness = map(index, 0, spectrumHist.length, 255, 100);
   const alpha = map(index, 0, spectrumHist.length, 1, 0.3) * avgAmplitude * CONFIG.brightnessMult;
-  const hue = CONFIG.colors.primary[0];
   const radiusMult = 1 + layerRatio * CONFIG.spacingFactor;
 
-  // Set color
-  buffer.stroke(hue, 255, brightness, alpha);
+  // Set color using the AQI hue instead of CONFIG.colors.primary
+  buffer.stroke(aqiHue, aqiSaturation, brightness, alpha);
 
   // Only fill the newest layer
   if (index === 0) {
-    buffer.fill(hue, 255, brightness, 0.2 * avgAmplitude * CONFIG.brightnessMult);
+    buffer.fill(aqiHue, aqiSaturation, brightness, 0.2 * avgAmplitude * CONFIG.brightnessMult);
   } else {
     buffer.noFill();
   }
@@ -842,16 +840,39 @@ function drawSpectrumLayer(buffer, layer, index, numBands) {
   buffer.endShape(CLOSE);
 }
 
-function drawCenterCircle(buffer) {
-  buffer.fill(CONFIG.colors.primary);
+function drawCenterCircle(buffer, aqiHue, aqiSaturation, aqiBrightness) {
+  // Use AQI color for center circle
+  buffer.fill(aqiHue, aqiSaturation, aqiBrightness);
   buffer.circle(0, 0, 80);
+
+  // Add text to show AQI value in center
+  buffer.textFont(fontRegular);
+  buffer.fill(0);
+  buffer.textAlign(CENTER, CENTER);
+  buffer.textSize(24);
+  buffer.text(aqData["AQI (US)"], 0, 0);
 }
 
 // ===== PARTICLE SYSTEM =====
-function updateAndDrawParticles(buffer, isHighEnergy) {
+function createParticle(isHighEnergy, aqiHue) {
+  const pos = p5.Vector.random2D().mult(60);
+
+  // Use AQI hue with randomized brightness for particles
+  const particleHue = aqiHue || CONFIG.colors.accent[0];
+
+  return {
+    pos: pos,
+    vel: createVector(0, 0),
+    acc: pos.copy().mult(random(0.0001, 0.00001)),
+    size: isHighEnergy ? random(5, 25) : random(3, 6),
+    color: color(particleHue, CONFIG.colors.accent[1], random(30, 80))
+  };
+}
+
+function updateAndDrawParticles(buffer, isHighEnergy, aqiHue) {
   // Add new particles if conditions met
   if (song.isPlaying() && particles.length < CONFIG.maxParticles) {
-    particles.push(createParticle(isHighEnergy));
+    particles.push(createParticle(isHighEnergy, aqiHue));
   }
 
   // Update and draw particles
@@ -864,23 +885,9 @@ function updateAndDrawParticles(buffer, isHighEnergy) {
     }
 
     updateParticle(p, isHighEnergy);
-
     drawParticle(buffer, p);
-
   }
 }
-
-function createParticle(isHighEnergy) {
-  const pos = p5.Vector.random2D().mult(60);
-  return {
-    pos: pos,
-    vel: createVector(0, 0),
-    acc: pos.copy().mult(random(0.0001, 0.00001)),
-    size: isHighEnergy ? random(5, 25) : random(3, 6),
-    color: color(CONFIG.colors.accent[0], CONFIG.colors.accent[1], random(30, 80))
-  };
-}
-
 function updateParticle(p, isHighEnergy) {
   p.vel.add(p.acc);
   p.pos.add(p.vel);
@@ -914,14 +921,12 @@ function displayAirInfo() {
   textSize(24);
 
   // Display city name
-  text(`City: ${currentCity}`, 20, 40);
+  // text(`City: ${currentCity}`, 20, 40);
 
   // Display AQI value with color indicator
-  const aqiValue = aqData["AQI (US)"];
-  const aqiColor = getAQIColor(aqiValue);
+  // const aqiValue = aqData["AQI (US)"];
 
-  // fill(aqiColor);
-  text(`AQI (US): ${aqiValue}`, 20, 70);
+  // text(`AQI (US): ${aqiValue}`, 20, 70);
 
   fill(255);
   let yOffset = height - 10;
@@ -947,13 +952,13 @@ function displayAirInfo() {
 
 // Helper function to get color based on AQI value
 function getAQIColor(aqi) {
-  // EPA AQI color scale
-  if (aqi <= 50) return color(0, 228, 0);      // Good - Green
-  if (aqi <= 100) return color(255, 255, 0);   // Moderate - Yellow
-  if (aqi <= 150) return color(255, 126, 0);   // Unhealthy for Sensitive Groups - Orange
-  if (aqi <= 200) return color(255, 0, 0);     // Unhealthy - Red
-  if (aqi <= 300) return color(143, 63, 151);  // Very Unhealthy - Purple
-  return color(126, 0, 35);                    // Hazardous - Maroon
+  // EPA AQI color scale in HSB format
+  if (aqi <= 50) return [120, 100, 80];      // Good - Green
+  if (aqi <= 100) return [60, 100, 100];     // Moderate - Yellow
+  if (aqi <= 150) return [30, 100, 100];     // Unhealthy for Sensitive Groups - Orange
+  if (aqi <= 200) return [0, 100, 100];      // Unhealthy - Red
+  if (aqi <= 300) return [270, 60, 60];      // Very Unhealthy - Purple
+  return [345, 100, 50];                     // Hazardous - Maroon
 }
 
 
