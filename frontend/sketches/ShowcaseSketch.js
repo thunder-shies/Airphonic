@@ -15,7 +15,7 @@ const CONFIG = {
   maxVolume: 1,
 
   // Mountain visualization
-  mountainSensitivity: 1,
+  mountainSensitivity: 2,
   mountainStepSize: 2,
   frameInterval: 3,
 
@@ -26,7 +26,7 @@ const CONFIG = {
   spacingFactor: 2,
 
   // Particles
-  maxParticles: 1000,
+  maxParticles: 500, // Reduced for performance
   highEnergyThreshold: 230,
 
   // Colors (HSB format)
@@ -84,6 +84,7 @@ let aqData = {
 let particles = [];
 let wavePos = 512;
 let horizScale;
+let projScale = 1;
 
 // Graphics buffers
 let canvasHist, mountainBuffer, circularBuffer;
@@ -128,97 +129,18 @@ function draw() {
   drawMountainVis();
   drawCircularVis();
 
-
   // Display both visualizations
   image(mountainBuffer, 0, 0);
   image(circularBuffer, 0, 0);
-
-  const pollutantLvls = {
-    pm25: {
-      name: 'PM2.5',
-      unit: 'μg/m³',
-      levels: {
-        good: { maxValue: 12.0, label: 'Good', color: [97, 251, 76] },
-        moderate: { maxValue: 35.4, label: 'Moderate', color: [255, 210, 0] },
-        unhealthy4SG: { maxValue: 55.4, label: 'Unhealthy for Sensitive Groups', color: [255, 126, 0] },
-        unhealthy: { maxValue: 150.4, label: 'Unhealthy', color: [229, 0, 19] },
-        veryUnhealthy: { maxValue: 250.4, label: 'Very Unhealthy', color: [143, 63, 151] },
-        hazardous: { maxValue: 9999.9, label: 'Hazardous', color: [26, 0, 35] }
-      }
-    },
-    pm10: {
-      name: 'PM10',
-      unit: 'μg/m³',
-      levels: {
-        good: { maxValue: 54.0, label: 'Good', color: [97, 251, 76] },
-        moderate: { maxValue: 154.0, label: 'Moderate', color: [255, 210, 0] },
-        unhealthy4SG: { maxValue: 254.0, label: 'Unhealthy for Sensitive Groups', color: [255, 126, 0] },
-        unhealthy: { maxValue: 354.0, label: 'Unhealthy', color: [229, 0, 19] },
-        veryUnhealthy: { maxValue: 424.0, label: 'Very Unhealthy', color: [143, 63, 151] },
-        hazardous: { maxValue: 9999.9, label: 'Hazardous', color: [26, 0, 35] }
-      }
-    },
-    so2: {
-      name: 'SO₂',
-      unit: 'µg/m³',
-      levels: {
-        good: { maxValue: 91.7, label: 'Good', color: [97, 251, 76] },
-        moderate: { maxValue: 196.5, label: 'Moderate', color: [255, 210, 0] },
-        unhealthy4SG: { maxValue: 484.7, label: 'Unhealthy for Sensitive Groups', color: [255, 126, 0] },
-        unhealthy: { maxValue: 796.5, label: 'Unhealthy', color: [229, 0, 19] },
-        veryUnhealthy: { maxValue: 1582.5, label: 'Very Unhealthy', color: [143, 63, 151] },
-        hazardous: { maxValue: 2630.5, label: 'Hazardous', color: [26, 0, 35] }
-      }
-    },
-    no2: {
-      name: 'NO₂',
-      unit: 'µg/m³',
-      levels: {
-        good: { maxValue: 100, label: 'Good', color: [97, 251, 76] },
-        moderate: { maxValue: 188, label: 'Moderate', color: [255, 210, 0] },
-        unhealthy4SG: { maxValue: 676, label: 'Unhealthy for Sensitive Groups', color: [255, 126, 0] },
-        unhealthy: { maxValue: 1220, label: 'Unhealthy', color: [229, 0, 19] },
-        veryUnhealthy: { maxValue: 2346, label: 'Very Unhealthy', color: [143, 63, 151] },
-        hazardous: { maxValue: 3847, label: 'Hazardous', color: [26, 0, 35] }
-      }
-    },
-    o3: {
-      name: 'O₃',
-      unit: 'µg/m³',
-      levels: {
-        good: { maxValue: 122, label: 'Good', color: [97, 251, 76] },
-        moderate: { maxValue: 147, label: 'Moderate', color: [255, 210, 0] },
-        unhealthy4SG: { maxValue: 186, label: 'Unhealthy for Sensitive Groups', color: [255, 126, 0] },
-        unhealthy: { maxValue: 225, label: 'Unhealthy', color: [229, 0, 19] },
-        veryUnhealthy: { maxValue: 459, label: 'Very Unhealthy', color: [143, 63, 151] },
-        hazardous: { maxValue: 9999.9, label: 'Hazardous', color: [26, 0, 35] }
-      }
-    },
-    co: {
-      name: 'CO',
-      unit: 'µg/m³',
-      levels: {
-        good: { maxValue: 5037, label: 'Good', color: [97, 251, 76] },
-        moderate: { maxValue: 10772, label: 'Moderate', color: [255, 210, 0] },
-        unhealthy4SG: { maxValue: 14201, label: 'Unhealthy for Sensitive Groups', color: [255, 126, 0] },
-        unhealthy: { maxValue: 17638, label: 'Unhealthy', color: [229, 0, 19] },
-        veryUnhealthy: { maxValue: 34814, label: 'Very Unhealthy', color: [143, 63, 151] },
-        hazardous: { maxValue: 64504, label: 'Hazardous', color: [26, 0, 35] }
-      }
-    }
-  };
-
 
   displayAirInfo();
 }
 
 // ===== SETUP FUNCTIONS =====
 function setupCanvas() {
-  const canvasDiv = document.getElementById("p5Canvas");
-  const width = canvasDiv.offsetWidth;
-  const height = canvasDiv.offsetHeight;
+  // const sketchCanvas = createCanvas(1920 * projScale, 1080 * projScale);
+  const sketchCanvas = createCanvas(windowWidth, windowHeight);
 
-  const sketchCanvas = createCanvas(width, height);
   sketchCanvas.parent("p5Canvas");
 
   pixelDensity(1);
@@ -299,7 +221,6 @@ async function fetchData() {
   }
 
   try {
-    // console.log(`Fetching air quality data for ${currentCity}`);
     const response = await fetch(`https://airphonic.onrender.com/api/get-latest?city=${currentCity}`);
 
     if (!response.ok) {
@@ -318,8 +239,6 @@ async function fetchData() {
       "O₃": result.find(item => item.name === "o3")?.value || 0,
       "CO": result.find(item => item.name === "co")?.value || 0
     };
-
-    // console.log("Updated air quality data:", aqData);
 
     // Create a formatted object for pollutant sound updates
     const aqDataForSounds = {
@@ -720,7 +639,7 @@ function drawMountainWaveAndOutline(buffer) {
   // Draw points along the wave
   for (let i = CONFIG.mountainStepSize; i < CONFIG.bufferSize; i += CONFIG.mountainStepSize) {
     buffer.vertex(
-      i * horizScale,
+      i * horizScale * projScale,
       wavePos + frequencies[i] * CONFIG.mountainSensitivity
     );
   }
@@ -843,19 +762,19 @@ function drawSpectrumLayer(buffer, layer, index, numBands, aqiHue, aqiSaturation
 function drawCenterCircle(buffer, aqiHue, aqiSaturation, aqiBrightness) {
   // Use AQI color for center circle
   buffer.fill(aqiHue, aqiSaturation, aqiBrightness);
-  buffer.circle(0, 0, 80);
+  buffer.circle(0, 0, 80 * projScale);
 
   // Add text to show AQI value in center
   buffer.textFont(fontRegular);
   buffer.fill(0);
   buffer.textAlign(CENTER, CENTER);
-  buffer.textSize(24);
+  buffer.textSize(24 * projScale);
   buffer.text(aqData["AQI (US)"], 0, 0);
 }
 
 // ===== PARTICLE SYSTEM =====
 function createParticle(isHighEnergy, aqiHue) {
-  const pos = p5.Vector.random2D().mult(60);
+  const pos = p5.Vector.random2D().mult(60 * projScale);
 
   // Use AQI hue with randomized brightness for particles
   const particleHue = aqiHue || CONFIG.colors.accent[0];
@@ -918,7 +837,7 @@ function displayAirInfo() {
   push();
   textFont(fontRegular);
   fill(255);
-  textSize(24);
+  textSize(24 * projScale);
 
   // Display city name
   // text(`City: ${currentCity}`, 20, 40);
@@ -944,7 +863,7 @@ function displayAirInfo() {
     // Format the number to have at most 1 decimal place
     const formattedValue = typeof data.value === 'number' ? data.value.toFixed(1) : data.value;
     text(`${data.name}: ${formattedValue}`, 20, yOffset);
-    yOffset -= 30;
+    yOffset -= 30 * projScale;
   }
 
   pop();
@@ -966,20 +885,22 @@ function getAQIColor(aqi) {
 function displayLoadingScreen() {
   push();
   fill(255);
-  textSize(32);
+  textSize(32 * projScale);
   textAlign(CENTER, CENTER);
   text("Loading audio...", width / 2, height / 2);
   pop();
 }
 
+
 function displayStartAudioPrompt() {
   push();
   fill(255);
-  textSize(32);
+  textSize(32 * projScale);
   textAlign(CENTER, CENTER);
   text("Click anywhere to start", width / 2, height / 2);
   pop();
 }
+
 
 function togglePlayback() {
   if (song.isPlaying()) {
@@ -992,33 +913,33 @@ function togglePlayback() {
 }
 
 // ===== WINDOW EVENTS =====
-function windowResized() {
-  // Store old state
-  const oldBuffers = {
-    canvasHist: canvasHist.get(),
-    mountainBuffer: mountainBuffer.get(),
-    circularBuffer: circularBuffer.get()
-  };
+// function windowResized() {
+//   // Store old state
+//   const oldBuffers = {
+//     canvasHist: canvasHist.get(),
+//     mountainBuffer: mountainBuffer.get(),
+//     circularBuffer: circularBuffer.get()
+//   };
 
-  const oldDimensions = {
-    width: width,
-    height: height
-  };
+//   const oldDimensions = {
+//     width: width,
+//     height: height
+//   };
 
-  // Resize canvas
-  const canvasDiv = document.getElementById("p5Canvas");
-  resizeCanvas(canvasDiv.offsetWidth, canvasDiv.offsetHeight);
+//   // Resize canvas
+//   const canvasDiv = document.getElementById("p5Canvas");
+//   resizeCanvas(1920 * projScale, 1080 * projScale);
 
-  // Update scaling factor
-  horizScale = width / CONFIG.bufferSize;
+//   // Update scaling factor
+//   horizScale = width / CONFIG.bufferSize;
 
-  // Recreate buffers at new size
-  recreateBuffers(oldBuffers, oldDimensions);
+//   // Recreate buffers at new size
+//   recreateBuffers(oldBuffers, oldDimensions);
 
-  // Update elements that depend on dimensions
-  scaleParticlePos(oldDimensions.width, oldDimensions.height);
-  wavePos = (wavePos / oldDimensions.height) * height;
-}
+//   // Update elements that depend on dimensions
+//   scaleParticlePos(oldDimensions.width, oldDimensions.height);
+//   wavePos = (wavePos / oldDimensions.height) * height;
+// }
 
 function recreateBuffers(oldBuffers, oldDimensions) {
   // Recreate all buffers
