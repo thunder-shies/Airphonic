@@ -13,7 +13,7 @@ function setup() {
 
   // Initially hide all elements
   hideElements();
-  registerServiceWorker("../service-worker.js");
+  registerServiceWorker("service-worker.js");
 
   hkToggle.onPress = function () {
     if (hkToggle.val) {

@@ -1,7 +1,7 @@
 {
-    "name": "re-airphonic",
+    "name": "airphonic",
     "version": "1.0.0",
-    "description": "Interactive audio visualization control panel",
+    "description": "Airphonic – Sonifying Air Quality",
     "main": "server/server.js",
     "scripts": {
         "start": "node server/server.js",

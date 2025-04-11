@@ -256,7 +256,7 @@ function setupAudio() {
 }
 
 function setupMessageListener() {
-  registerServiceWorker('../service-worker.js');
+  registerServiceWorker("service-worker.js");
   listenMessage(function (incomingData) {
     packedData = incomingData.message;
   });
