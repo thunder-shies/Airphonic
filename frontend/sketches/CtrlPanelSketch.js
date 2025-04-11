@@ -4,6 +4,7 @@ let hkToggle, bkkToggle, timeSlider, volSlider;
 let toggles = {}; // Export toggles
 let sliders = {};
 let labels = ["CO", "O₃", "NO₂", "SO₂", "PM₂.₅", "PM₁₀"];
+let volSliderlabel, timeSliderlabel;
 
 function setup() {
   setupCanvas();
@@ -19,6 +20,26 @@ function setup() {
     if (hkToggle.val) {
       bkkToggle.val = false;
       gui.loadStyle("TerminalMagenta");
+      volSliderlabel.setStyle({
+        fillBg: color("#000000"),
+        fillBgHover: color("#000000"),
+        fillBgActive: color("#000000"),
+        strokeWeight: 0,
+        fillLabel: color("#FFFFFF"),
+        fillLabelHover: color("#FFFFFF"),
+        fillLabelActive: color("#FFFFFF"),
+        textSize: 24,
+      });
+      timeSliderlabel.setStyle({
+        fillBg: color("#000000"),
+        fillBgHover: color("#000000"),
+        fillBgActive: color("#000000"),
+        strokeWeight: 0,
+        fillLabel: color("#FFFFFF"),
+        fillLabelHover: color("#FFFFFF"),
+        fillLabelActive: color("#FFFFFF"),
+        textSize: 24,
+      });
       showElements();
       sendMessage({
         currentCity: "HongKong",
@@ -36,6 +57,26 @@ function setup() {
     if (bkkToggle.val) {
       hkToggle.val = false;
       gui.loadStyle("TerminalBlue");
+      volSliderlabel.setStyle({
+        fillBg: color("#000000"),
+        fillBgHover: color("#000000"),
+        fillBgActive: color("#000000"),
+        strokeWeight: 0,
+        fillLabel: color("#FFFFFF"),
+        fillLabelHover: color("#FFFFFF"),
+        fillLabelActive: color("#FFFFFF"),
+        textSize: 24,
+      });
+      timeSliderlabel.setStyle({
+        fillBg: color("#000000"),
+        fillBgHover: color("#000000"),
+        fillBgActive: color("#000000"),
+        strokeWeight: 0,
+        fillLabel: color("#FFFFFF"),
+        fillLabelHover: color("#FFFFFF"),
+        fillLabelActive: color("#FFFFFF"),
+        textSize: 24,
+      });
       showElements();
       sendMessage({
         currentCity: "Bangkok",
@@ -122,6 +163,11 @@ function initElements() {
     100
   );
 
+
+  volSliderlabel = createButton("Vol", w * 0.89, h * 0.75, 60, 50);
+  timeSliderlabel = createButton("Time", w * 0.79, h * 0.75, 60, 50);
+
+
   let elementSize = w * 0.14;
   let padding = w * 0.13;
   let numCols = 3;
@@ -174,6 +220,8 @@ function hideElements() {
   }
   timeSlider.visible = false;
   volSlider.visible = false;
+  volSliderlabel.visible = false;
+  timeSliderlabel.visible = false;
 }
 
 function showElements() {
@@ -183,6 +231,8 @@ function showElements() {
   }
   timeSlider.visible = true;
   volSlider.visible = true;
+  volSliderlabel.visible = true;
+  timeSliderlabel.visible = true;
 }
 
 function touchMoved() {
