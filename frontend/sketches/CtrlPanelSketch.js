@@ -82,7 +82,8 @@ function draw() {
       for (let pollutant of labels) {
         pollutantData.pollutants[pollutant] = {
           active: toggles[pollutant].val,
-          level: map(sliders[pollutant].val, 0, 100, 0, 1)
+          level: 0.5, // default level of pollution, you can change this to any value between 0 and 1
+          volume: map(sliders[pollutant].val, 0, 100, 0, 1) // map slider value to volume
         };
       }
 
@@ -94,7 +95,6 @@ function draw() {
     }
   }
 }
-
 
 function initElements() {
   let w = width;
