@@ -70,7 +70,15 @@ let pollutantSounds = {
   "PM10": pm10Sound
 };
 let currentlyPlaying = {};
-
+let aqData = {
+  "AQI (US)": 0,
+  "PM₂.₅": 0,
+  "PM₁₀": 0,
+  "SO₂": 0,
+  "NO₂": 0,
+  "O₃": 0,
+  "CO": 0
+};
 
 // Visualization state
 let particles = [];
@@ -211,7 +219,7 @@ function draw() {
   };
 
 
-  displayAirInfo(pollutants);
+  displayAirInfo();
 }
 
 // ===== SETUP FUNCTIONS =====
@@ -286,8 +294,8 @@ function loadPollutantSounds() {
   // Load 6 levels (0-5) for each pollutant
   for (let pLevel = 0; pLevel < 6; pLevel++) {
     coSound.push(loadSound("assets/audio/co/coSound_" + str(pLevel) + ".wav"));
-    // o3Sound.push(loadSound("assets/audio/o3/o3Sound_" + str(pLevel) + ".mp3"));
-    // no2Sound.push(loadSound("assets/audio/no2/no2Sound_" + str(pLevel) + ".mp3"));
+    o3Sound.push(loadSound("assets/audio/o3/o3Sound_" + str(pLevel) + ".mp3"));
+    no2Sound.push(loadSound("assets/audio/no2/no2Sound_" + str(pLevel) + ".mp3"));
     so2Sound.push(loadSound("assets/audio/so2/so2Sound_" + str(pLevel) + ".wav"));
     pm25Sound.push(loadSound("assets/audio/pm25/pm25Sound_" + str(pLevel) + ".mp3"));
     pm10Sound.push(loadSound("assets/audio/pm10/pm10Sound_" + str(pLevel) + ".mp3"));
@@ -301,7 +309,7 @@ async function fetchData() {
   }
 
   try {
-    console.log(`Fetching air quality data for ${currentCity}`);
+    // console.log(`Fetching air quality data for ${currentCity}`);
     const response = await fetch(`https://airphonic.onrender.com/api/get-latest?city=${currentCity}`);
 
     if (!response.ok) {
@@ -310,8 +318,21 @@ async function fetchData() {
 
     const result = await response.json();
 
-    // Format the data
-    const aqData = {
+    // Format the data and update global aqData object
+    aqData = {
+      "AQI (US)": result.find(item => item.name === "aqius")?.value || 0,
+      "PM₂.₅": result.find(item => item.name === "pm25")?.value || 0,
+      "PM₁₀": result.find(item => item.name === "pm10")?.value || 0,
+      "SO₂": result.find(item => item.name === "so2")?.value || 0,
+      "NO₂": result.find(item => item.name === "no2")?.value || 0,
+      "O₃": result.find(item => item.name === "o3")?.value || 0,
+      "CO": result.find(item => item.name === "co")?.value || 0
+    };
+
+    // console.log("Updated air quality data:", aqData);
+
+    // Create a formatted object for pollutant sound updates
+    const aqDataForSounds = {
       aqius: result.find(item => item.name === "aqius")?.value || 0,
       pm25: result.find(item => item.name === "pm25")?.value || 0,
       pm10: result.find(item => item.name === "pm10")?.value || 0,
@@ -321,12 +342,10 @@ async function fetchData() {
       co: result.find(item => item.name === "co")?.value || 0,
     };
 
-    console.log("Received air quality data:", aqData);
-
     // Update pollutant sounds based on the data
-    updatePollutantSoundsFromAQData(aqData);
+    updatePollutantSoundsFromAQData(aqDataForSounds);
 
-    return aqData;
+    return aqDataForSounds;
   } catch (error) {
     console.error('Error fetching air quality data:', error);
     return null;
@@ -337,45 +356,42 @@ async function fetchData() {
 function updatePollutantSoundsFromAQData(aqData) {
   if (!aqData) return;
 
-  // Define thresholds for each pollutant to determine sound levels (0-5)
   const thresholds = {
-    pm25: [12.0, 35.4, 55.4, 150.4, 250.4], // PM2.5 thresholds
-    pm10: [54.0, 154.0, 254.0, 354.0, 424.0], // PM10 thresholds
-    so2: [91.7, 196.5, 484.7, 796.5, 1582.5], // SO2 thresholds
-    no2: [100, 188, 676, 1220, 2346], // NO2 thresholds
-    o3: [122, 147, 186, 225, 459], // O3 thresholds
-    co: [5037, 10772, 14201, 17638, 34814], // CO thresholds
+    pm25: [12.0, 35.4, 55.4, 150.4, 250.4],
+    pm10: [54.0, 154.0, 254.0, 354.0, 424.0],
+    so2: [91.7, 196.5, 484.7, 796.5, 1582.5],
+    no2: [100, 188, 676, 1220, 2346],
+    o3: [122, 147, 186, 225, 459],
+    co: [5037, 10772, 14201, 17638, 34814],
   };
 
-  // Map AQ data to pollutant sounds
   const pollutantUpdates = {
     "PM25": {
-      active: true,
+      active: false, // Ensure toggle is explicitly considered
       level: getLevelFromThresholds(aqData.pm25, thresholds.pm25) / 5
     },
     "PM10": {
-      active: true,
+      active: false,
       level: getLevelFromThresholds(aqData.pm10, thresholds.pm10) / 5
     },
     "SO2": {
-      active: true,
+      active: false,
       level: getLevelFromThresholds(aqData.so2, thresholds.so2) / 5
     },
     "NO2": {
-      active: true,
+      active: false,
       level: getLevelFromThresholds(aqData.no2, thresholds.no2) / 5
     },
     "O3": {
-      active: true,
+      active: false,
       level: getLevelFromThresholds(aqData.o3, thresholds.o3) / 5
     },
     "CO": {
-      active: true,
+      active: false,
       level: getLevelFromThresholds(aqData.co, thresholds.co) / 5
     }
   };
 
-  // Update pollutant sounds
   handlePollutantUpdate(pollutantUpdates);
 }
 
@@ -435,7 +451,7 @@ function initAudio() {
   fft.setInput(song);
   analyzer.setInput(song);
 
-  console.log("Audio initialized for:", currentCity);
+  // console.log("Audio initialized for:", currentCity);
 }
 
 function updateAudioData() {
@@ -508,7 +524,7 @@ function processPackedData() {
 }
 
 async function handleCityChange(newCity) {
-  console.log("Changing city to:", newCity);
+  // console.log("Changing city to:", newCity);
 
   // Stop current song
   if (song && song.isLoaded()) {
@@ -522,15 +538,15 @@ async function handleCityChange(newCity) {
 
   // Select the new song
   switch (newCity) {
-    case "HKG":
+    case "HongKong":
       song = hkgBGM;
       break;
-    case "BKK":
+    case "Bangkok":
       song = bkkBGM;
       break;
     default:
       song = nullBGM;
-      stopAllPollutantSounds(); // Stop pollutant sounds for "None" or invalid city
+      stopAllPollutantSounds();
       break;
   }
 
@@ -540,16 +556,16 @@ async function handleCityChange(newCity) {
     song.loop();
     song.setVolume(CONFIG.bgmVolume);
 
-    // Re-enable pollutant sounds if switching back to a valid city
-    if (newCity === "HKG" || newCity === "BKK") {
+    // Re-enable pollutant sounds with only the toggles being on.
+    if (newCity === "HongKong" || newCity === "Bangkok") {
       const aqData = await fetchData(); // Fetch air quality data for the new city
       if (aqData) {
-        updatePollutantSoundsFromAQData(aqData); // Update pollutant sounds based on the data
+        updatePollutantSoundsFromAQData(aqData);
       }
     }
   } else {
     console.error("Selected song is not loaded:", newCity);
-    // Fallback to silence
+
     if (nullBGM && nullBGM.isLoaded()) {
       song = nullBGM;
       initAudio();
@@ -595,32 +611,22 @@ function getNormalizedPollutantName(name) {
 }
 
 function handlePollutantUpdate(pollutants) {
-  console.log("Updating pollutants:", pollutants);
+  // console.log("Updating pollutants:", pollutants);
 
-  // Process each pollutant
   for (const [name, data] of Object.entries(pollutants)) {
-    // Normalize the pollutant name to match our sound array keys
     const normalizedName = getNormalizedPollutantName(name);
 
-    // data.active is a boolean (true/false) indicating if the pollutant is enabled
-    // data.level is a value between 0-1 indicating the pollution severity (which sound file to play)
-    // data.volume is a value between 0-1 indicating how loud to play the sound
-
-    if (data.active) {
-      // Convert the 0-1 level value to a discrete level between 0-5
+    if (data.active) { // Only play sound if active is true
       const discreteLevel = Math.floor(data.level * 5);
-
-      // Play the pollution level sound at the specified volume
       playPollutantSound(normalizedName, discreteLevel, data.volume);
     } else {
-      // Pollutant is inactive, stop its sound
       stopPollutantSound(normalizedName);
     }
   }
 }
 
 
-function playPollutantSound(name, level, volume = 0.7) {
+function playPollutantSound(name, level, volume = 0.5) {
   // Ensure level is within bounds (0-5)
   level = constrain(level, 0, 5);
 
@@ -639,7 +645,7 @@ function playPollutantSound(name, level, volume = 0.7) {
     if (currentVolume !== volume) {
       soundArray[level].setVolume(volume);
       currentlyPlaying[name + "_volume"] = volume;
-      console.log(`Updated ${name} sound volume to ${volume.toFixed(2)}`);
+      // console.log(`Updated ${name} sound volume to ${volume.toFixed(2)}`);
     }
     return;
   }
@@ -657,7 +663,7 @@ function playPollutantSound(name, level, volume = 0.7) {
   currentlyPlaying[name] = level;
   currentlyPlaying[name + "_volume"] = volume;
 
-  console.log(`Playing ${name} sound at level ${level} with volume ${volume.toFixed(2)}`);
+  // console.log(`Playing ${name} sound at level ${level} with volume ${volume.toFixed(2)}`);
 }
 
 function stopPollutantSound(name) {
@@ -844,7 +850,7 @@ function drawCenterCircle(buffer) {
 // ===== PARTICLE SYSTEM =====
 function updateAndDrawParticles(buffer, isHighEnergy) {
   // Add new particles if conditions met
-  if (song.isPlaying() && particles.length < CONFIG.maxParticles && mouseIsPressed) {
+  if (song.isPlaying() && particles.length < CONFIG.maxParticles) {
     particles.push(createParticle(isHighEnergy));
   }
 
@@ -859,9 +865,8 @@ function updateAndDrawParticles(buffer, isHighEnergy) {
 
     updateParticle(p, isHighEnergy);
 
-    if (mouseIsPressed) {
-      drawParticle(buffer, p);
-    }
+    drawParticle(buffer, p);
+
   }
 }
 
@@ -902,26 +907,53 @@ function isParticleOffscreen(p) {
 
 
 // ===== EVENT LISTENERS =====
-function displayAirInfo(pollutants) {
+function displayAirInfo() {
   push();
   textFont(fontRegular);
   fill(255);
-  textSize(32); // Text size for pollutant names
-  text(`AQI (US):`, 20, 60);
+  textSize(24);
 
-  // Display each pollutant with smaller text size for numbers
-  let yOffset = 100; // Starting y position for pollutants
-  for (let pollutant in pollutants) {
-    let value = pollutants[pollutant];
+  // Display city name
+  text(`City: ${currentCity}`, 20, 40);
 
-    // Render pollutant name
-    textSize(32); // Text size for pollutant names
-    text(`${pollutant}: `, 20, yOffset);
+  // Display AQI value with color indicator
+  const aqiValue = aqData["AQI (US)"];
+  const aqiColor = getAQIColor(aqiValue);
 
-    yOffset += 40; // Increment y position for the next pollutant
+  // fill(aqiColor);
+  text(`AQI (US): ${aqiValue}`, 20, 70);
+
+  fill(255);
+  let yOffset = height - 10;
+
+  const pollutantData = [
+    { name: "PM₂.₅", value: aqData["PM₂.₅"], unit: "μg/m³" },
+    { name: "PM₁₀", value: aqData["PM₁₀"], unit: "μg/m³" },
+    { name: "SO₂", value: aqData["SO₂"], unit: "μg/m³" },
+    { name: "NO₂", value: aqData["NO₂"], unit: "μg/m³" },
+    { name: "O₃", value: aqData["O₃"], unit: "μg/m³" },
+    { name: "CO", value: aqData["CO"], unit: "μg/m³" }
+  ];
+
+  for (const data of pollutantData) {
+    // Format the number to have at most 1 decimal place
+    const formattedValue = typeof data.value === 'number' ? data.value.toFixed(1) : data.value;
+    text(`${data.name}: ${formattedValue}`, 20, yOffset);
+    yOffset -= 30;
   }
 
   pop();
+}
+
+// Helper function to get color based on AQI value
+function getAQIColor(aqi) {
+  // EPA AQI color scale
+  if (aqi <= 50) return color(0, 228, 0);      // Good - Green
+  if (aqi <= 100) return color(255, 255, 0);   // Moderate - Yellow
+  if (aqi <= 150) return color(255, 126, 0);   // Unhealthy for Sensitive Groups - Orange
+  if (aqi <= 200) return color(255, 0, 0);     // Unhealthy - Red
+  if (aqi <= 300) return color(143, 63, 151);  // Very Unhealthy - Purple
+  return color(126, 0, 35);                    // Hazardous - Maroon
 }
 
 

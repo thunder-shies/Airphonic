@@ -1,7 +1,7 @@
 let gui;
 let sketchCanvas; // Declare at top for global access
 let hkToggle, bkkToggle, timeSlider, volSlider;
-let toggles = {}; // Use toggles instead of checkboxes
+let toggles = {}; // Export toggles
 let sliders = {};
 let labels = ["CO", "O₃", "NO₂", "SO₂", "PM₂.₅", "PM₁₀"];
 
@@ -21,7 +21,7 @@ function setup() {
       gui.loadStyle("TerminalMagenta");
       showElements();
       sendMessage({
-        currentCity: "HKG",
+        currentCity: "HongKong",
       }); // Send city change to showcase
     } else {
       hideElements();
@@ -38,7 +38,7 @@ function setup() {
       gui.loadStyle("TerminalBlue");
       showElements();
       sendMessage({
-        currentCity: "BKK",
+        currentCity: "Bangkok",
       });
     } else {
       hideElements();
@@ -81,9 +81,9 @@ function draw() {
       // This ensures we always send complete pollutant state
       for (let pollutant of labels) {
         pollutantData.pollutants[pollutant] = {
-          active: toggles[pollutant].val,
-          level: 0.5, // default level of pollution, you can change this to any value between 0 and 1
-          volume: map(sliders[pollutant].val, 0, 100, 0, 1) // map slider value to volume
+          active: toggles[pollutant].val, // If toggle is on, active will be true
+          level: 0.5, // Default level of pollution, changeable between 0 and 1
+          volume: map(sliders[pollutant].val, 0, 100, 0, 1) // Map slider value to volume
         };
       }
 
