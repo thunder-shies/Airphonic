@@ -6,10 +6,12 @@ console.log("%c p5.localmessage Loaded ", "color:yellow; background:black; ");
 if (navigator.serviceWorker) {
 
   p5.prototype.registerServiceWorker = function (path) {
-    const basePath = window.location.pathname.includes("Airphonic")
+    const basePath = window.location.pathname.startsWith("/Airphonic")
       ? "/Airphonic/"
       : "/";
-    navigator.serviceWorker.register(basePath + path);
+    navigator.serviceWorker.register(basePath + path).catch((error) => {
+      console.error("Service Worker registration failed:", error);
+    });
   };
 
 } else {
