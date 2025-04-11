@@ -7,12 +7,12 @@ if (navigator.serviceWorker) {
 
   p5.prototype.registerServiceWorker = function (path) {
     const basePath = window.location.pathname.startsWith("/Airphonic")
-      ? "/Airphonic/"
-      : "/";
+      ? "/Airphonic/frontend/"
+      : "/frontend/";
     navigator.serviceWorker.register(basePath + path).catch((error) => {
       console.error("Service Worker registration failed:", error);
     });
-  };
+  }
 
 } else {
   console.error('service workers are not supported in this browser, try using chrome!')
