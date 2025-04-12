@@ -1,3 +1,5 @@
+let socket;
+
 let gui;
 let sketchCanvas; // Declare at top for global access
 let hkToggle, bkkToggle, timeSlider, volSlider;

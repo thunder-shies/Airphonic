@@ -1,0 +1,17 @@
+{
+  "name": "airphonic-websocket-server",
+  "version": "1.0.0",
+  "description": "WebSocket server for Airphonic exhibit",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.18.1"
+  },
+    "engines": {
+    "node": "22.14.0"
+  }
+}
