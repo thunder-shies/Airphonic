@@ -1,5 +1,6 @@
+const SERVER_ADDRESS = 'wss://airphonic-websockets.onrender.com';
+// const SERVER_ADDRESS = 'ws://127.0.0.1:8080'; // Localhost for testing
 let socket;
-
 let gui;
 let sketchCanvas; // Declare at top for global access
 let hkToggle, bkkToggle, timeSlider, volSlider;
@@ -16,7 +17,16 @@ function setup() {
 
   // Initially hide all elements
   hideElements();
-  registerServiceWorker("service-worker.js");
+  // registerServiceWorker("service-worker.js");
+  console.log(`Control Panel: Connecting to WebSocket at ${SERVER_ADDRESS}`);
+  try {
+    socket = new WebSocket(SERVER_ADDRESS);
+    socket.onopen = () => console.log('Control Panel: WebSocket connection opened');
+    socket.onerror = (error) => console.error('Control Panel: WebSocket Error: ', error);
+    socket.onclose = (event) => console.log(`Control Panel: WebSocket closed. Code: ${event.code}`);
+  } catch (e) {
+    console.error("Control Panel: Failed to create WebSocket", e);
+  }
 
   hkToggle.onPress = function () {
     if (hkToggle.val) {
@@ -43,13 +53,13 @@ function setup() {
         textSize: 24,
       });
       showElements();
-      sendMessage({
+      sendWebSocketMessage({
         currentCity: "HongKong",
       }); // Send city change to showcase
     } else {
       hideElements();
       gui.loadStyle("Gray");
-      sendMessage({
+      sendWebSocketMessage({
         currentCity: "None",
       });
     }
@@ -80,13 +90,13 @@ function setup() {
         textSize: 24,
       });
       showElements();
-      sendMessage({
+      sendWebSocketMessage({
         currentCity: "Bangkok",
       });
     } else {
       hideElements();
       gui.loadStyle("Gray");
-      sendMessage({
+      sendWebSocketMessage({
         currentCity: "None",
       });
     }
@@ -100,14 +110,15 @@ function draw() {
 
   if (volSlider.isChanged) {
     let volume = map(volSlider.val, -100, 100, 0, 1); // normalize volume to 0.0 - 1.0
-    sendMessage({
+    console.log("Volume slider changed, calling sendWebSocketMessage with:", { bgmVolume: volume });
+    sendWebSocketMessage({
       bgmVolume: volume,
     });
   }
 
   if (timeSlider.isChanged) {
     let time = map(timeSlider.val, 0, 100, 0, 1); // normalize time to 0.0 - 1.0
-    sendMessage({
+    sendWebSocketMessage({
       time: time,
     });
   }
@@ -130,8 +141,9 @@ function draw() {
         };
       }
 
+      console.log("Pollutant state changed, calling sendWebSocketMessage with:", pollutantData);
       // Send the complete pollutant data
-      sendMessage(pollutantData);
+      sendWebSocketMessage(pollutantData);
 
       // Exit the loop after sending (to avoid multiple sends in one frame)
       break;
@@ -259,4 +271,19 @@ function windowResized() {
   var x = (windowWidth - width) / 2;
   var y = (windowHeight - height) / 2;
   sketchCanvas.position(x, y);
+}
+
+function sendWebSocketMessage(data) {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    console.log("Control Panel: Attempting to send:", data); // <-- Add this log
+    try {
+      const messageString = JSON.stringify(data);
+      socket.send(messageString);
+      console.log("Control Panel: Sent OK:", messageString); // <-- Add this log
+    } catch (error) {
+      console.error("Control Panel: Error sending message:", error);
+    }
+  } else {
+    console.warn(`Control Panel: WebSocket not open (State: ${socket ? socket.readyState : 'null'}). Message not sent:`, data);
+  }
 }

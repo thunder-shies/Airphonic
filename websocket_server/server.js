@@ -8,11 +8,11 @@ const clients = new Set();
 console.log(`WebSocket server started on port ${PORT}`);
 
 wss.on('connection', (ws) => {
-    console.log('Client connected');
+    console.log(`Client connected. Total clients: ${clients.size}`);
     clients.add(ws);
 
     ws.on('message', (message) => {
-        // console.log('Received:', message.toString()); // enabled for debugging
+        // console.log('Server Received:', message.toString()); // <-- Check this log
         // Broadcast to all *other* connected clients
         clients.forEach((client) => {
             if (client !== ws && client.readyState === WebSocket.OPEN) {
@@ -26,7 +26,7 @@ wss.on('connection', (ws) => {
     });
 
     ws.on('close', () => {
-        console.log('Client disconnected');
+        console.log(`Client disconnected. Total clients: ${clients.size}`);
         clients.delete(ws);
     });
 

@@ -1,16 +1,30 @@
-// ===== CONFIGURATION =====
+
+// Configuration
+// const SERVER_ADDRESS = 'ws://127.0.0.1:8080'; // Localhost for testing
+const SERVER_ADDRESS = 'wss://airphonic-websockets.onrender.com'; // Production
+
+// Global variables
+let socket;
+let messageQueue = [];
+
+// Configuration settings
 const CONFIG = {
   // Audio settings
   bufferSize: 512,
   fftSmoothing: 0.9,
   ampSmoothing: 0.9,
   bgmVolume: 0.5,
-  coVolume: 0.5,
-  o3Volume: 0.5,
-  no2Volume: 0.5,
-  so2Volume: 0.5,
-  pm25Volume: 0.5,
-  pm10Volume: 0.5,
+
+  // Consolidated pollutant volumes into a single object
+  pollutantVolumes: {
+    CO: 0.5,
+    O3: 0.5,
+    NO2: 0.5,
+    SO2: 0.5,
+    PM25: 0.5,
+    PM10: 0.5
+  },
+
   minVolume: 0,
   maxVolume: 1,
 
@@ -32,8 +46,30 @@ const CONFIG = {
   // Colors (HSB format)
   colors: {
     primary: [120, 100, 45], // Green
-    accent: [200, 0, 60], // Blue-ish for particles
+    accent: [200, 0, 60] // Blue-ish for particles
   },
+
+  o3Effect: {
+    maxUVRays: 5,         // Increased for better coverage
+    maxNOxParticles: 30,   // More particles for better effect
+    maxOzoneBursts: 10,    // More concurrent bursts
+    collisionDistance: 5,
+    rayMinLength: 200,     // Minimum ray length
+    rayMaxLength: null,    // Will be set to height in setup
+    raySpeed: { min: 3, max: 5 },
+    rayThickness: { min: 5, max: 30 },
+    rayBrightness: { min: 50, max: 100 }
+  }
+};
+
+// AQI color mapping
+const AQI_COLORS = {
+  50: [120, 100, 80],    // Good - Green
+  100: [60, 100, 100],   // Moderate - Yellow
+  150: [30, 100, 100],   // Unhealthy for Sensitive Groups - Orange
+  200: [0, 100, 100],    // Unhealthy - Red
+  300: [270, 60, 60],    // Very Unhealthy - Purple
+  max: [345, 100, 50]    // Hazardous - Maroon
 };
 
 // ===== STATE VARIABLES =====
@@ -42,7 +78,6 @@ let started = false;
 let audioStarted = false;
 let isAudioLoading = false;
 let currentCity = "None";
-let lastProcessedData = null;
 
 // Audio components
 let song;
@@ -50,24 +85,17 @@ let fft, analyzer, audioContext, analyserNode;
 let frequencies = [];
 let avgAmplitude = 0;
 let spectrumHist = [];
-let packedData = {};
 
 // Assets files
 let nullBGM, hkgBGM, bkkBGM;
 let fontRegular;
-let coSound = [];
-let o3Sound = [];
-let no2Sound = [];
-let so2Sound = [];
-let pm25Sound = [];
-let pm10Sound = [];
 let pollutantSounds = {
-  "CO": coSound,
-  "O3": o3Sound,
-  "NO2": no2Sound,
-  "SO2": so2Sound,
-  "PM25": pm25Sound,
-  "PM10": pm10Sound
+  "CO": [],
+  "O3": [],
+  "NO2": [],
+  "SO2": [],
+  "PM25": [],
+  "PM10": []
 };
 let currentlyPlaying = {};
 let aqData = {
@@ -86,6 +114,12 @@ let wavePos = 512;
 let horizScale;
 let projScale = 1;
 
+// --- O₃ sketch state ---
+let o3_uvRays = [];
+let o3_noxParticles = [];
+let o3_ozoneBursts = [];
+
+
 // Graphics buffers
 let canvasHist, mountainBuffer, circularBuffer;
 
@@ -97,16 +131,25 @@ function preload() {
 
   loadPollutantSounds();
 
-  fontRegular = loadFont("assets/font/RubikGlitch-Regular.ttf");
+  fontRegular = loadFont("assets/font/Quadaptor.otf");
 }
 
 function setup() {
   setupCanvas();
   setupBuffers();
   setupAudio();
-  setupMessageListener();
+  setupWebSocket();
   setupDataFetching();
   started = true;
+
+  // --- Init O₃ effect ---
+  for (let i = 0; i < CONFIG.o3Effect.maxUVRays; i++) {
+    o3_uvRays.push(new O3_UVRay());
+  }
+  for (let i = 0; i < CONFIG.o3Effect.maxNOxParticles; i++) {
+    o3_noxParticles.push(new O3_NOxParticle());
+  }
+
 }
 
 function draw() {
@@ -122,7 +165,9 @@ function draw() {
     return;
   }
 
-  processPackedData();
+  // Process ONE message from the queue per frame
+  processMessageQueue();
+
   updateAudioData();
 
   // Draw visualizations
@@ -131,16 +176,24 @@ function draw() {
 
   // Display both visualizations
   image(mountainBuffer, 0, 0);
+
+  if (currentlyPlaying["PM25"] !== undefined || currentlyPlaying["PM10"] !== undefined) {
+    drawPMParticles();
+  }
+
+  if (currentlyPlaying["O3"] !== undefined) {
+    drawO3Sketch();
+  }
+
   image(circularBuffer, 0, 0);
 
   displayAirInfo();
+  displayTime();
 }
 
 // ===== SETUP FUNCTIONS =====
 function setupCanvas() {
-  // const sketchCanvas = createCanvas(1920 * projScale, 1080 * projScale);
   const sketchCanvas = createCanvas(windowWidth, windowHeight);
-
   sketchCanvas.parent("p5Canvas");
 
   pixelDensity(1);
@@ -177,17 +230,52 @@ function setupAudio() {
   canvas.addEventListener("touchstart", startAudio, { once: true });
 }
 
-function setupMessageListener() {
-  registerServiceWorker("service-worker.js");
-  listenMessage(function (incomingData) {
-    packedData = incomingData.message;
-  });
+function setupWebSocket() {
+  console.log(`Showcase: Connecting to WebSocket at ${SERVER_ADDRESS}`);
+
+  try {
+    socket = new WebSocket(SERVER_ADDRESS);
+
+    socket.onopen = () => console.log('Showcase: WebSocket connection opened');
+    socket.onerror = (error) => console.error('Showcase: WebSocket Error: ', error);
+    socket.onclose = (event) => console.log(`Showcase: WebSocket closed. Code: ${event.code}`);
+
+    socket.onmessage = handleWebSocketMessage;
+  } catch (e) {
+    console.error("Showcase: Failed to create WebSocket", e);
+  }
+}
+
+function handleWebSocketMessage(event) {
+  let receivedDataString;
+
+  // Ensure data is a string
+  if (typeof event.data === 'string') {
+    receivedDataString = event.data;
+  } else {
+    console.warn("Showcase: event.data was not a string! Type:", typeof event.data);
+    receivedDataString = String(event.data);
+  }
+
+  // Parse the data
+  try {
+    const parsedData = JSON.parse(receivedDataString);
+    messageQueue.push(parsedData);
+  } catch (e) {
+    console.error('Showcase: Error parsing received string:', e);
+    console.error('Showcase: The string that failed parsing was:', receivedDataString);
+  }
+}
+
+function processMessageQueue() {
+  if (messageQueue.length > 0) {
+    const dataToProcess = messageQueue.shift(); // Get the oldest message from the queue
+    handleReceivedData(dataToProcess);
+  }
 }
 
 function startAudio() {
   audioContext.resume().then(() => {
-    // console.log("AudioContext resumed!");
-
     // Start with silent track
     song = nullBGM;
 
@@ -203,14 +291,15 @@ function startAudio() {
 }
 
 function loadPollutantSounds() {
+
   // Load 6 levels (0-5) for each pollutant
   for (let pLevel = 0; pLevel < 6; pLevel++) {
-    coSound.push(loadSound("assets/audio/co/coSound_" + str(pLevel) + ".wav"));
-    o3Sound.push(loadSound("assets/audio/o3/o3Sound_" + str(pLevel) + ".mp3"));
-    no2Sound.push(loadSound("assets/audio/no2/no2Sound_" + str(pLevel) + ".mp3"));
-    so2Sound.push(loadSound("assets/audio/so2/so2Sound_" + str(pLevel) + ".wav"));
-    pm25Sound.push(loadSound("assets/audio/pm25/pm25Sound_" + str(pLevel) + ".mp3"));
-    pm10Sound.push(loadSound("assets/audio/pm10/pm10Sound_" + str(pLevel) + ".mp3"));
+    pollutantSounds["CO"].push(loadSound(`assets/audio/co/coSound_${pLevel}.wav`));
+    pollutantSounds["O3"].push(loadSound(`assets/audio/o3/o3Sound_${pLevel}.mp3`));
+    pollutantSounds["NO2"].push(loadSound(`assets/audio/no2/no2Sound_${pLevel}.mp3`));
+    pollutantSounds["SO2"].push(loadSound(`assets/audio/so2/so2Sound_${pLevel}.wav`));
+    pollutantSounds["PM25"].push(loadSound(`assets/audio/pm25/pm25Sound_${pLevel}.mp3`));
+    pollutantSounds["PM10"].push(loadSound(`assets/audio/pm10/pm10Sound_${pLevel}.mp3`));
   }
 }
 
@@ -230,15 +319,7 @@ async function fetchData() {
     const result = await response.json();
 
     // Format the data and update global aqData object
-    aqData = {
-      "AQI (US)": result.find(item => item.name === "aqius")?.value || 0,
-      "PM₂.₅": result.find(item => item.name === "pm25")?.value || 0,
-      "PM₁₀": result.find(item => item.name === "pm10")?.value || 0,
-      "SO₂": result.find(item => item.name === "so2")?.value || 0,
-      "NO₂": result.find(item => item.name === "no2")?.value || 0,
-      "O₃": result.find(item => item.name === "o3")?.value || 0,
-      "CO": result.find(item => item.name === "co")?.value || 0
-    };
+    updateAQData(result);
 
     // Create a formatted object for pollutant sound updates
     const aqDataForSounds = {
@@ -261,6 +342,33 @@ async function fetchData() {
   }
 }
 
+function updateAQData(result) {
+  aqData = {
+    "AQI (US)": result.find(item => item.name === "aqius")?.value || 0,
+    "PM₂.₅": result.find(item => item.name === "pm25")?.value || 0,
+    "PM₁₀": result.find(item => item.name === "pm10")?.value || 0,
+    "SO₂": result.find(item => item.name === "so2")?.value || 0,
+    "NO₂": result.find(item => item.name === "no2")?.value || 0,
+    "O₃": result.find(item => item.name === "o3")?.value || 0,
+    "CO": result.find(item => item.name === "co")?.value || 0
+  };
+
+  // Convert PPM to µg/m³ for Bangkok
+  if (currentCity === 'Bangkok') {
+    const coPpm = result.find(item => item.name === "co")?.value || 0;
+    aqData["CO"] = ppmToUgm3('co', coPpm);
+
+    const no2Ppm = result.find(item => item.name === "no2")?.value || 0;
+    aqData["NO₂"] = ppmToUgm3('no2', no2Ppm);
+
+    const o3Ppm = result.find(item => item.name === "o3")?.value || 0;
+    aqData["O₃"] = ppmToUgm3('o3', o3Ppm);
+
+    const so2Ppm = result.find(item => item.name === "so2")?.value || 0;
+    aqData["SO₂"] = ppmToUgm3('so2', so2Ppm);
+  }
+}
+
 // Function to update pollutant sounds based on AQ data
 function updatePollutantSoundsFromAQData(aqData) {
   if (!aqData) return;
@@ -274,33 +382,35 @@ function updatePollutantSoundsFromAQData(aqData) {
     co: [5037, 10772, 14201, 17638, 34814],
   };
 
+  // Create pollutant updates, preserving active state from currentlyPlaying
   const pollutantUpdates = {
     "PM25": {
-      active: false, // Ensure toggle is explicitly considered
+      active: currentlyPlaying["PM25"] !== undefined, // Preserve active state
       level: getLevelFromThresholds(aqData.pm25, thresholds.pm25) / 5
     },
     "PM10": {
-      active: false,
+      active: currentlyPlaying["PM10"] !== undefined, // Preserve active state
       level: getLevelFromThresholds(aqData.pm10, thresholds.pm10) / 5
     },
     "SO2": {
-      active: false,
+      active: currentlyPlaying["SO2"] !== undefined, // Preserve active state
       level: getLevelFromThresholds(aqData.so2, thresholds.so2) / 5
     },
     "NO2": {
-      active: false,
+      active: currentlyPlaying["NO2"] !== undefined, // Preserve active state
       level: getLevelFromThresholds(aqData.no2, thresholds.no2) / 5
     },
     "O3": {
-      active: false,
+      active: currentlyPlaying["O3"] !== undefined, // Preserve active state
       level: getLevelFromThresholds(aqData.o3, thresholds.o3) / 5
     },
     "CO": {
-      active: false,
+      active: currentlyPlaying["CO"] !== undefined, // Preserve active state
       level: getLevelFromThresholds(aqData.co, thresholds.co) / 5
     }
   };
 
+  // Only update sounds for pollutants that should be playing
   handlePollutantUpdate(pollutantUpdates);
 }
 
@@ -326,6 +436,31 @@ function setupDataFetching() {
 
   // Set up interval for periodic fetching (every 60 seconds)
   setInterval(fetchData, 60000);
+}
+
+// Convert gas concentration from PPM to µg/m³
+function ppmToUgm3(gas, ppm) {
+  // Molar volume at 25°C and 1 atm in m³/mol
+  const molarVolume = 0.02445;
+
+  // Molecular weights in g/mol for each gas
+  const molecularWeights = {
+    'co': 28,
+    'no2': 46,
+    'o3': 48,
+    'so2': 64
+  };
+
+  // Get the molecular weight for the specified gas (case-insensitive)
+  const M = molecularWeights[gas.toLowerCase()];
+
+  // Check if the gas is valid
+  if (!M) {
+    throw new Error('Unknown gas. Please use "CO", "NO2", "O3", or "SO2".');
+  }
+
+  // Calculate and return the concentration in µg/m³
+  return Number((ppm * (M / molarVolume)).toFixed(1));
 }
 
 // ===== AUDIO PROCESSING =====
@@ -359,8 +494,6 @@ function initAudio() {
   // Set inputs for p5 components
   fft.setInput(song);
   analyzer.setInput(song);
-
-  // console.log("Audio initialized for:", currentCity);
 }
 
 function updateAudioData() {
@@ -372,78 +505,45 @@ function updateAudioData() {
   avgAmplitude = lerp(avgAmplitude, currentLevel, 1 - CONFIG.ampSmoothing);
 }
 
-function processPackedData() {
-  // Skip if no data or unchanged data
-  if (!packedData || Object.keys(packedData).length === 0) {
-    return;
-  }
+function handleReceivedData(receivedData) {
+  // console.log("Showcase: Handling received data:", JSON.stringify(receivedData));
 
-  if (lastProcessedData && JSON.stringify(lastProcessedData) === JSON.stringify(packedData)) {
-    return;
-  }
-
-  // console.log("Processing new packed data:", packedData);
-
-  // Extract city information
-  let newCity = null;
-  let newVolume = null;
-
-  // Check for city/location data using the new property name
-  if (packedData.currentCity) {
-    newCity = packedData.currentCity;
-  } else if (packedData.city) {
-    newCity = packedData.city;
-  } else if (packedData.location) {
-    newCity = packedData.location;
-  } else if (packedData.audio) {
-    newCity = packedData.audio;
-  } else if (typeof packedData === 'string') {
-    newCity = packedData;
-  }
-
-  // Check for volume data using the new property name
-  if (packedData.bgmVolume !== undefined) {
-    newVolume = parseFloat(packedData.bgmVolume);
-  } else if (packedData.volume !== undefined) {
-    newVolume = parseFloat(packedData.volume);
-  } else if (packedData.volSlider !== undefined) {
-    newVolume = parseFloat(packedData.volSlider);
-  } else if (packedData.volumeLevel !== undefined) {
-    newVolume = parseFloat(packedData.volumeLevel);
-  }
+  // Extract data properties
+  const newCity = receivedData?.currentCity;
+  const newVolume = parseFloat(receivedData?.bgmVolume);
+  const pollutants = receivedData?.pollutants;
 
   // Apply changes
-  if (newCity) {
+  if (newCity && newCity !== currentCity) {
+    // console.log("Showcase: Changing city to:", newCity);
     handleCityChange(newCity);
   }
 
-  if (newVolume !== null && !isNaN(newVolume)) {
-    // Ensure volume is within valid range
-    newVolume = constrain(newVolume, CONFIG.minVolume, CONFIG.maxVolume);
-    updateBgmVolume(newVolume);
+  if (!isNaN(newVolume)) {
+    // console.log("Showcase: Updating volume to:", newVolume);
+    updateBgmVolume(constrain(newVolume, CONFIG.minVolume, CONFIG.maxVolume));
   }
 
-  // Check for pollutant data
-  if (packedData.pollutants) {
-    handlePollutantUpdate(packedData.pollutants);
+  if (pollutants) {
+    // console.log("Showcase: Updating pollutants");
+    handlePollutantUpdate(pollutants);
   }
-
-  // Save this data as processed
-  lastProcessedData = JSON.parse(JSON.stringify(packedData));
 }
 
 async function handleCityChange(newCity) {
-  // console.log("Changing city to:", newCity);
-
-  // Stop current song
-  if (song && song.isLoaded()) {
-    if (song.isPlaying()) {
+  if (song && song.isLoaded() && song.isPlaying()) {
+    song.setVolume(0, 0.5);
+    setTimeout(() => {
       song.stop();
-    }
-    song.disconnect();
+      song.disconnect();
+    }, 500);
   }
 
   currentCity = newCity;
+
+  if (newCity === "None") {
+    stopAllPollutantSounds();
+  }
 
   // Select the new song
   switch (newCity) {
@@ -455,22 +555,19 @@ async function handleCityChange(newCity) {
       break;
     default:
       song = nullBGM;
-      stopAllPollutantSounds();
       break;
   }
 
-  // Play the new song if loaded
+  await new Promise(resolve => setTimeout(resolve, 500));
+
   if (song && song.isLoaded()) {
     initAudio();
+    song.setVolume(0);
     song.loop();
-    song.setVolume(CONFIG.bgmVolume);
+    song.setVolume(CONFIG.bgmVolume, 0.5);
 
-    // Re-enable pollutant sounds with only the toggles being on.
     if (newCity === "HongKong" || newCity === "Bangkok") {
       const aqData = await fetchData(); // Fetch air quality data for the new city
-      if (aqData) {
-        updatePollutantSoundsFromAQData(aqData);
-      }
     }
   } else {
     console.error("Selected song is not loaded:", newCity);
@@ -479,14 +576,12 @@ async function handleCityChange(newCity) {
       song = nullBGM;
       initAudio();
       song.loop();
-      song.setVolume(CONFIG.bgmVolume);
+      song.setVolume(CONFIG.bgmVolume, 0.5);
     }
   }
 }
 
 function updateBgmVolume(newVolume) {
-  // console.log("Updating volume to:", newVolume);
-
   // Update the config value
   CONFIG.bgmVolume = newVolume;
 
@@ -496,8 +591,8 @@ function updateBgmVolume(newVolume) {
   }
 }
 
+// Normalize pollutant names to standard format
 function getNormalizedPollutantName(name) {
-  // Convert various formats to the standard keys used in pollutantSounds
   const nameMap = {
     // Standard keys
     "CO": "CO",
@@ -507,7 +602,7 @@ function getNormalizedPollutantName(name) {
     "PM25": "PM25",
     "PM10": "PM10",
 
-    // Alternative formats that might come from the control panel
+    // Alternative formats
     "O₃": "O3",
     "NO₂": "NO2",
     "SO₂": "SO2",
@@ -519,13 +614,12 @@ function getNormalizedPollutantName(name) {
   return nameMap[name] || name;
 }
 
+// Update pollutant sounds based on control panel input
 function handlePollutantUpdate(pollutants) {
-  // console.log("Updating pollutants:", pollutants);
-
   for (const [name, data] of Object.entries(pollutants)) {
     const normalizedName = getNormalizedPollutantName(name);
 
-    if (data.active) { // Only play sound if active is true
+    if (data.active) {
       const discreteLevel = Math.floor(data.level * 5);
       playPollutantSound(normalizedName, discreteLevel, data.volume);
     } else {
@@ -534,12 +628,9 @@ function handlePollutantUpdate(pollutants) {
   }
 }
 
-
 function playPollutantSound(name, level, volume = 0.5) {
-  // Ensure level is within bounds (0-5)
   level = constrain(level, 0, 5);
 
-  // Get the sound array for this pollutant
   const soundArray = pollutantSounds[name];
 
   if (!soundArray || !soundArray[level]) {
@@ -547,32 +638,30 @@ function playPollutantSound(name, level, volume = 0.5) {
     return;
   }
 
-  // Check if we're already playing this exact sound
   if (currentlyPlaying[name] === level) {
-    // Already playing this exact level, just update volume if needed
     const currentVolume = currentlyPlaying[name + "_volume"];
     if (currentVolume !== volume) {
-      soundArray[level].setVolume(volume);
+      const sound = soundArray[level];
+      const fadeTime = 0.1; // 100ms fade
+      sound.setVolume(volume, fadeTime);
       currentlyPlaying[name + "_volume"] = volume;
-      // console.log(`Updated ${name} sound volume to ${volume.toFixed(2)}`);
     }
     return;
   }
 
-  // Stop any currently playing sound for this pollutant
-  stopPollutantSound(name);
+  if (currentlyPlaying[name] !== undefined) {
+    const oldLevel = currentlyPlaying[name];
+    const oldSound = soundArray[oldLevel];
+    oldSound.setVolume(0, 0.1);
+    setTimeout(() => oldSound.stop(), 100);
+  }
 
-  // Set volume based on the provided volume parameter
-  soundArray[level].setVolume(volume);
-
-  // Start playing and looping the sound
+  soundArray[level].setVolume(0);
   soundArray[level].loop();
+  soundArray[level].setVolume(volume, 0.1);
 
-  // Track which sound is playing and its volume
   currentlyPlaying[name] = level;
   currentlyPlaying[name + "_volume"] = volume;
-
-  // console.log(`Playing ${name} sound at level ${level} with volume ${volume.toFixed(2)}`);
 }
 
 function stopPollutantSound(name) {
@@ -583,21 +672,41 @@ function stopPollutantSound(name) {
     return;
   }
 
-  // Stop all sounds for this pollutant
-  for (let i = 0; i < soundArray.length; i++) {
-    if (soundArray[i] && soundArray[i].isPlaying()) {
-      soundArray[i].stop();
+  // Get currently playing sound for this pollutant
+  const currentLevel = currentlyPlaying[name];
+  if (currentLevel !== undefined) {
+    const sound = soundArray[currentLevel];
+    if (sound && sound.isPlaying()) {
+      // Fade out over 500ms before stopping
+      sound.setVolume(0, 0.5);
+      setTimeout(() => {
+        sound.stop();
+        // Remove from currently playing after fade out
+        delete currentlyPlaying[name];
+        delete currentlyPlaying[name + "_volume"];
+      }, 500);
     }
   }
-
-  // Remove from currently playing
-  delete currentlyPlaying[name];
 }
 
 function stopAllPollutantSounds() {
-  for (const pollutant in pollutantSounds) {
-    stopPollutantSound(pollutant);
-  }
+  Object.keys(pollutantSounds).forEach(pollutant => {
+    const soundArray = pollutantSounds[pollutant];
+    const currentLevel = currentlyPlaying[pollutant];
+
+    if (currentLevel !== undefined && soundArray[currentLevel]?.isPlaying()) {
+      // Fade out each active sound
+      soundArray[currentLevel].setVolume(0, 0.5);
+      setTimeout(() => {
+        soundArray[currentLevel].stop();
+      }, 500);
+    }
+  });
+
+  // Clear currentlyPlaying after fade out
+  setTimeout(() => {
+    currentlyPlaying = {};
+  }, 500);
 }
 
 // ===== MOUNTAIN VISUALIZATION =====
@@ -686,7 +795,6 @@ function drawCircularVis() {
 
   drawSpectrumHistory(circularBuffer, spectrum, aqiHue, aqiSaturation);
   drawCenterCircle(circularBuffer, aqiHue, aqiSaturation, aqiBrightness);
-  updateAndDrawParticles(circularBuffer, isHighEnergy, aqiHue);
 
   circularBuffer.pop();
 }
@@ -734,7 +842,7 @@ function drawSpectrumLayer(buffer, layer, index, numBands, aqiHue, aqiSaturation
   const alpha = map(index, 0, spectrumHist.length, 1, 0.3) * avgAmplitude * CONFIG.brightnessMult;
   const radiusMult = 1 + layerRatio * CONFIG.spacingFactor;
 
-  // Set color using the AQI hue instead of CONFIG.colors.primary
+  // Set color using the AQI hue
   buffer.stroke(aqiHue, aqiSaturation, brightness, alpha);
 
   // Only fill the newest layer
@@ -807,6 +915,7 @@ function updateAndDrawParticles(buffer, isHighEnergy, aqiHue) {
     drawParticle(buffer, p);
   }
 }
+
 function updateParticle(p, isHighEnergy) {
   p.vel.add(p.acc);
   p.pos.add(p.vel);
@@ -832,75 +941,96 @@ function isParticleOffscreen(p) {
 }
 
 
-// ===== EVENT LISTENERS =====
+// ===== DISPLAY FUNCTIONS =====
 function displayAirInfo() {
+  const FONT_SIZE = 32 * projScale;
+  const SPACING = 40 * projScale;
+  const MARGIN = 20;
+
   push();
   textFont(fontRegular);
   fill(255);
-  textSize(24 * projScale);
+  textSize(FONT_SIZE);
 
-  // Display city name
-  // text(`City: ${currentCity}`, 20, 40);
-
-  // Display AQI value with color indicator
-  // const aqiValue = aqData["AQI (US)"];
-
-  // text(`AQI (US): ${aqiValue}`, 20, 70);
-
-  fill(255);
-  let yOffset = height - 10;
-
-  const pollutantData = [
-    { name: "PM₂.₅", value: aqData["PM₂.₅"], unit: "μg/m³" },
-    { name: "PM₁₀", value: aqData["PM₁₀"], unit: "μg/m³" },
-    { name: "SO₂", value: aqData["SO₂"], unit: "μg/m³" },
-    { name: "NO₂", value: aqData["NO₂"], unit: "μg/m³" },
-    { name: "O₃", value: aqData["O₃"], unit: "μg/m³" },
-    { name: "CO", value: aqData["CO"], unit: "μg/m³" }
+  // Define pollutant data structure
+  const pollutants = [
+    { name: "PM₂.₅", key: "PM₂.₅" },
+    { name: "PM₁₀", key: "PM₁₀" },
+    { name: "SO₂", key: "SO₂" },
+    { name: "NO₂", key: "NO₂" },
+    { name: "O₃", key: "O₃" },
+    { name: "CO", key: "CO" }
   ];
 
-  for (const data of pollutantData) {
-    // Format the number to have at most 1 decimal place
-    const formattedValue = typeof data.value === 'number' ? data.value.toFixed(1) : data.value;
-    text(`${data.name}: ${formattedValue}`, 20, yOffset);
-    yOffset -= 30 * projScale;
-  }
+  // Draw pollutant values from bottom up
+  let yPos = height - MARGIN;
+  pollutants.forEach(({ name, key }) => {
+    const value = aqData[key];
+    text(`${name}: ${value} μg/m³`, MARGIN, yPos);
+    yPos -= SPACING;
+  });
 
   pop();
 }
 
-// Helper function to get color based on AQI value
 function getAQIColor(aqi) {
-  // EPA AQI color scale in HSB format
-  if (aqi <= 50) return [120, 100, 80];      // Good - Green
-  if (aqi <= 100) return [60, 100, 100];     // Moderate - Yellow
-  if (aqi <= 150) return [30, 100, 100];     // Unhealthy for Sensitive Groups - Orange
-  if (aqi <= 200) return [0, 100, 100];      // Unhealthy - Red
-  if (aqi <= 300) return [270, 60, 60];      // Very Unhealthy - Purple
-  return [345, 100, 50];                     // Hazardous - Maroon
+  const AQI_COLORS = {
+    50: [120, 100, 80],  // Good - Green
+    100: [60, 100, 100],  // Moderate - Yellow
+    150: [30, 100, 100],  // Unhealthy for Sensitive Groups - Orange
+    200: [0, 100, 100],   // Unhealthy - Red
+    300: [270, 60, 60],   // Very Unhealthy - Purple
+    max: [345, 100, 50]   // Hazardous - Maroon
+  };
+
+  for (const threshold of Object.keys(AQI_COLORS)) {
+    if (aqi <= threshold) return AQI_COLORS[threshold];
+  }
+  return AQI_COLORS.max;
 }
 
-
-// ===== UTILITY FUNCTIONS =====
 function displayLoadingScreen() {
-  push();
-  fill(255);
-  textSize(32 * projScale);
-  textAlign(CENTER, CENTER);
-  text("Loading audio...", width / 2, height / 2);
-  pop();
+  displayCenteredText("Loading audio...");
 }
-
 
 function displayStartAudioPrompt() {
+  displayCenteredText("Click anywhere to start");
+}
+
+function displayTime() {
+  const FONT_SIZE = 32 * projScale;
+  const SPACING = 30 * projScale;
+  const MARGIN = 20;
+
+  push();
+  textFont(fontRegular);
+  fill(255);
+  textSize(FONT_SIZE);
+
+  const now = new Date();
+  const timeString = formatTime(now);
+
+  text(timeString, width - MARGIN - textWidth(timeString), height - SPACING);
+  pop();
+}
+
+function formatTime(date) {
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
+}
+
+
+function displayCenteredText(message) {
   push();
   fill(255);
   textSize(32 * projScale);
   textAlign(CENTER, CENTER);
-  text("Click anywhere to start", width / 2, height / 2);
+  textFont(fontRegular);
+  text(message, width / 2, height / 2);
   pop();
 }
-
 
 function togglePlayback() {
   if (song.isPlaying()) {
@@ -912,60 +1042,261 @@ function togglePlayback() {
   }
 }
 
-// ===== WINDOW EVENTS =====
-// function windowResized() {
-//   // Store old state
-//   const oldBuffers = {
-//     canvasHist: canvasHist.get(),
-//     mountainBuffer: mountainBuffer.get(),
-//     circularBuffer: circularBuffer.get()
-//   };
-
-//   const oldDimensions = {
-//     width: width,
-//     height: height
-//   };
-
-//   // Resize canvas
-//   const canvasDiv = document.getElementById("p5Canvas");
-//   resizeCanvas(1920 * projScale, 1080 * projScale);
-
-//   // Update scaling factor
-//   horizScale = width / CONFIG.bufferSize;
-
-//   // Recreate buffers at new size
-//   recreateBuffers(oldBuffers, oldDimensions);
-
-//   // Update elements that depend on dimensions
-//   scaleParticlePos(oldDimensions.width, oldDimensions.height);
-//   wavePos = (wavePos / oldDimensions.height) * height;
-// }
-
+// ===== BUFFER MANAGEMENT =====
+// Recreates graphical buffers with new dimensions
 function recreateBuffers(oldBuffers, oldDimensions) {
-  // Recreate all buffers
-  canvasHist = createGraphics(width, height);
-  canvasHist.background(0);
+  // Initialize new buffers
+  const newBuffers = {
+    canvasHist: createBuffer(),
+    mountainBuffer: createBuffer(),
+    circularBuffer: createCircularBuffer()
+  };
 
-  mountainBuffer = createGraphics(width, height);
-  mountainBuffer.background(0, 0);
+  // Copy old content with scaling
+  Object.entries(newBuffers).forEach(([key, buffer]) => {
+    buffer.image(oldBuffers[key], 0, 0, width, height);
+  });
 
-  circularBuffer = createGraphics(width, height);
-  circularBuffer.background(0, 0);
-  circularBuffer.angleMode(DEGREES);
-  circularBuffer.colorMode(HSB);
-
-  // Restore content with scaling
-  canvasHist.image(oldBuffers.canvasHist, 0, 0, width, height);
-  mountainBuffer.image(oldBuffers.mountainBuffer, 0, 0, width, height);
-  circularBuffer.image(oldBuffers.circularBuffer, 0, 0, width, height);
+  // Update global references
+  Object.assign(window, newBuffers);
 }
 
-function scaleParticlePos(oldWidth, oldHeight) {
-  const widthRatio = width / oldWidth;
-  const heightRatio = height / oldHeight;
+// Creates a basic graphics buffer
+function createBuffer() {
+  const buffer = createGraphics(width, height);
+  buffer.background(0, 0);
+  return buffer;
+}
 
-  particles.forEach(p => {
-    p.pos.x *= widthRatio;
-    p.pos.y *= heightRatio;
+// Creates a circular visualization buffer
+function createCircularBuffer() {
+  const buffer = createBuffer();
+  buffer.angleMode(DEGREES);
+  buffer.colorMode(HSB);
+  return buffer;
+}
+
+// Updates particle positions when canvas is resized
+function scaleParticlePos(oldWidth, oldHeight) {
+  const scale = {
+    x: width / oldWidth,
+    y: height / oldHeight
+  };
+
+  particles.forEach(particle => {
+    particle.pos.x *= scale.x;
+    particle.pos.y *= scale.y;
   });
+}
+
+
+// ===== POLLUTANT EFFECTS =====
+// PM Effects
+function drawPMParticles() {
+  const pm10Active = currentlyPlaying["PM10"] !== undefined;
+  const pm25Active = currentlyPlaying["PM25"] !== undefined;
+
+  if (!pm10Active && !pm25Active) {
+    particles = []; // Clear particles if no PM is active
+    return;
+  }
+
+  const bassEnergy = fft.getEnergy(20, 200);
+  const isHighEnergy = bassEnergy > CONFIG.highEnergyThreshold;
+
+  // Use PM level to affect particle appearance
+  const pmLevel = Math.max(
+    currentlyPlaying["PM10"] || 0,
+    currentlyPlaying["PM25"] || 0
+  ) / 5; // Normalized level (0-1)
+
+  push();
+  translate(width / 2, height / 2);
+
+  // Add new particles if needed
+  if (particles.length < CONFIG.maxParticles) {
+    particles.push(createParticle(isHighEnergy, pmLevel * 360)); // Use PM level for hue
+  }
+
+  // Update and draw existing particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+
+    if (isParticleOffscreen(p)) {
+      particles.splice(i, 1);
+      continue;
+    }
+
+    updateParticle(p, isHighEnergy);
+
+    // Draw with opacity based on PM level
+    noStroke();
+    const c = p.color;
+    fill(hue(c), saturation(c), brightness(c),
+      map(pmLevel, 0, 1, 100, 255));
+    ellipse(p.pos.x, p.pos.y, p.size);
+  }
+
+  pop();
+}
+
+// O3 Effects
+class O3_UVRay {
+  constructor() {
+    CONFIG.o3Effect.rayMaxLength = height; // Set max length based on canvas height
+    this.reset();
+  }
+
+  reset() {
+    // Center-based positioning
+    this.startX = width / 2;
+    this.startY = height / 2;
+    this.angle = random(360);
+    this.maxLength = random(CONFIG.o3Effect.rayMinLength, CONFIG.o3Effect.rayMaxLength);
+    this.speed = random(CONFIG.o3Effect.raySpeed.min, CONFIG.o3Effect.raySpeed.max);
+    this.length = 0;
+    this.endX = this.startX;
+    this.endY = this.startY;
+    this.thickness = random(CONFIG.o3Effect.rayThickness.min, CONFIG.o3Effect.rayThickness.max);
+    this.brightness = random(CONFIG.o3Effect.rayBrightness.min, CONFIG.o3Effect.rayBrightness.max);
+  }
+
+  update() {
+    this.length += this.speed;
+    if (this.length > this.maxLength) {
+      this.reset();
+    }
+    this.endX = this.startX + cos(this.angle) * this.length;
+    this.endY = this.startY + sin(this.angle) * this.length;
+  }
+
+  show() {
+    let alpha = map(this.length, 0, this.maxLength, 255, 100);
+    stroke(250, 100, this.brightness, alpha);
+    strokeWeight(this.thickness);
+    line(this.startX, this.startY, this.endX, this.endY);
+  }
+
+  hits(particle) {
+    let dx = particle.pos.x - this.startX;
+    let dy = particle.pos.y - this.startY;
+    let dirX = cos(this.angle);
+    let dirY = sin(this.angle);
+    let dotProduct = (dx * dirX + dy * dirY);
+
+    if (dotProduct > 0 && dotProduct < this.length) {
+      let perpX = this.startX + dirX * dotProduct;
+      let perpY = this.startY + dirY * dotProduct;
+      let perpDist = dist(particle.pos.x, particle.pos.y, perpX, perpY);
+      return perpDist < CONFIG.o3Effect.collisionDistance;
+    }
+    return false;
+  }
+}
+
+class O3_NOxParticle {
+  constructor() {
+    this.pos = createVector(random(width), random(height));
+    this.vel = p5.Vector.random2D().mult(random(0.2, 0.6));
+  }
+
+  move() {
+    this.pos.add(this.vel);
+    this.edges();
+  }
+
+  edges() {
+    if (this.pos.x > width || this.pos.x < 0) this.vel.x *= -1;
+    if (this.pos.y > height || this.pos.y < 0) this.vel.y *= -1;
+  }
+
+  display() {
+    noStroke();
+    fill(210, 100, 255);
+    ellipse(this.pos.x, this.pos.y, 6);
+  }
+}
+
+class O3_OzoneBurst {
+  constructor(x, y) {
+    this.pos = createVector(x, y);
+    this.r = 10;
+    this.opacity = 255;
+    // Random color from predefined range
+    this.hue = random([
+      random(345, 360), // Red (part 1)
+      random(0, 10),    // Red (part 2)
+      random(250, 290), // Purple
+      random(290, 330), // Pink
+      random(180, 250)  // Blue
+    ]);
+  }
+
+  update() {
+    this.r += 2;
+    this.opacity -= 6;
+  }
+
+  show() {
+    noFill();
+    blendMode(ADD);
+
+    // Glow effect with multiple layers
+    for (let i = 0; i < 5; i++) {
+      let glowOpacity = map(this.opacity * (1 - i * 0.2), 0, 255, 0, 100);
+      let glowRadius = this.r + i * 10;
+      strokeWeight(1);
+      stroke(this.hue, 80, 100, glowOpacity);
+      ellipse(this.pos.x, this.pos.y, glowRadius);
+    }
+
+    // Core circle
+    strokeWeight(1.5);
+    stroke(270, 80, 100, map(this.opacity, 0, 255, 0, 100));
+    ellipse(this.pos.x, this.pos.y, this.r);
+    blendMode(BLEND);
+  }
+
+  finished() {
+    return this.opacity <= 0;
+  }
+}
+
+function drawO3Sketch() {
+  push();
+  colorMode(HSB, 360, 100, 100, 255);
+
+  // Apply blur effect to UV rays
+  drawingContext.filter = 'blur(2px)';
+  for (let ray of o3_uvRays) {
+    ray.update();
+    ray.show();
+  }
+  drawingContext.filter = 'none';
+
+  // Update NOx particles and check collisions
+  for (let p of o3_noxParticles) {
+    p.move();
+    p.display();
+
+    if (o3_ozoneBursts.length < CONFIG.o3Effect.maxOzoneBursts) {
+      for (let ray of o3_uvRays) {
+        if (ray.hits(p)) {
+          o3_ozoneBursts.push(new O3_OzoneBurst(p.pos.x, p.pos.y));
+          break;
+        }
+      }
+    }
+  }
+
+  // Update and draw bursts
+  for (let i = o3_ozoneBursts.length - 1; i >= 0; i--) {
+    o3_ozoneBursts[i].update();
+    o3_ozoneBursts[i].show();
+    if (o3_ozoneBursts[i].finished()) {
+      o3_ozoneBursts.splice(i, 1);
+    }
+  }
+
+  pop();
 }
