@@ -1,23 +1,44 @@
-const SERVER_ADDRESS = 'wss://airphonic-websockets.onrender.com';
 // const SERVER_ADDRESS = 'ws://127.0.0.1:8080'; // Localhost for testing
+const SERVER_ADDRESS = 'wss://airphonic-websockets.onrender.com';
 let socket;
 let gui;
-let sketchCanvas; // Declare at top for global access
-let hkToggle, bkkToggle, timeSlider, volSlider;
-let toggles = {}; // Export toggles
+let sketchCanvas;
+let hkToggle, bkkToggle, volSlider;
+let toggles = {};
 let sliders = {};
 let labels = ["CO", "O₃", "NO₂", "SO₂", "PM₂.₅", "PM₁₀"];
-let volSliderlabel, timeSliderlabel;
+let volSliderlabel;
+
+// Dynamic sizing
+let canvasAspect = 917 / 688;
+let ctrlPanelW, ctrlPanelH;
+
+function getResponsiveSize() {
+  let margin = 50;
+  let w = windowWidth - margin * 2;
+  let h = windowHeight - margin * 2;
+  if (w / h > canvasAspect) {
+    w = h * canvasAspect;
+  } else {
+    h = w / canvasAspect;
+  }
+  return { w: round(w), h: round(h) };
+}
 
 function setup() {
-  setupCanvas();
+  // Responsive sizing
+  ({ w: ctrlPanelW, h: ctrlPanelH } = getResponsiveSize());
+  sketchCanvas = createCanvas(ctrlPanelW, ctrlPanelH);
+  sketchCanvas.parent("ctrlCanvas");
+
+  centerCanvas();
+
   gui = createGui();
   gui.loadStyle("Gray");
   initElements();
 
-  // Initially hide all elements
   hideElements();
-  // registerServiceWorker("service-worker.js");
+
   console.log(`Control Panel: Connecting to WebSocket at ${SERVER_ADDRESS}`);
   try {
     socket = new WebSocket(SERVER_ADDRESS);
@@ -32,36 +53,13 @@ function setup() {
     if (hkToggle.val) {
       bkkToggle.val = false;
       gui.loadStyle("TerminalMagenta");
-      volSliderlabel.setStyle({
-        fillBg: color("#000000"),
-        fillBgHover: color("#000000"),
-        fillBgActive: color("#000000"),
-        strokeWeight: 0,
-        fillLabel: color("#FFFFFF"),
-        fillLabelHover: color("#FFFFFF"),
-        fillLabelActive: color("#FFFFFF"),
-        textSize: 24,
-      });
-      timeSliderlabel.setStyle({
-        fillBg: color("#000000"),
-        fillBgHover: color("#000000"),
-        fillBgActive: color("#000000"),
-        strokeWeight: 0,
-        fillLabel: color("#FFFFFF"),
-        fillLabelHover: color("#FFFFFF"),
-        fillLabelActive: color("#FFFFFF"),
-        textSize: 24,
-      });
+      setLabelStyles();
       showElements();
-      sendWebSocketMessage({
-        currentCity: "HongKong",
-      }); // Send city change to showcase
+      sendWebSocketMessage({ currentCity: "HongKong" });
     } else {
       hideElements();
       gui.loadStyle("Gray");
-      sendWebSocketMessage({
-        currentCity: "None",
-      });
+      sendWebSocketMessage({ currentCity: "None" });
     }
   };
 
@@ -69,121 +67,79 @@ function setup() {
     if (bkkToggle.val) {
       hkToggle.val = false;
       gui.loadStyle("TerminalBlue");
-      volSliderlabel.setStyle({
-        fillBg: color("#000000"),
-        fillBgHover: color("#000000"),
-        fillBgActive: color("#000000"),
-        strokeWeight: 0,
-        fillLabel: color("#FFFFFF"),
-        fillLabelHover: color("#FFFFFF"),
-        fillLabelActive: color("#FFFFFF"),
-        textSize: 24,
-      });
-      timeSliderlabel.setStyle({
-        fillBg: color("#000000"),
-        fillBgHover: color("#000000"),
-        fillBgActive: color("#000000"),
-        strokeWeight: 0,
-        fillLabel: color("#FFFFFF"),
-        fillLabelHover: color("#FFFFFF"),
-        fillLabelActive: color("#FFFFFF"),
-        textSize: 24,
-      });
+      setLabelStyles();
       showElements();
-      sendWebSocketMessage({
-        currentCity: "Bangkok",
-      });
+      sendWebSocketMessage({ currentCity: "Bangkok" });
     } else {
       hideElements();
       gui.loadStyle("Gray");
-      sendWebSocketMessage({
-        currentCity: "None",
-      });
+      sendWebSocketMessage({ currentCity: "None" });
     }
   };
+}
+
+function setLabelStyles() {
+  // Use a dynamic text size based on canvas for labels
+  let dynTextSize = max(18, ctrlPanelH * 0.03);
+  volSliderlabel.setStyle({
+    fillBg: color("#000000"),
+    fillBgHover: color("#000000"),
+    fillBgActive: color("#000000"),
+    strokeWeight: 0,
+    fillLabel: color("#FFFFFF"),
+    fillLabelHover: color("#FFFFFF"),
+    fillLabelActive: color("#FFFFFF"),
+    textSize: dynTextSize,
+  });
 }
 
 function draw() {
   background(0);
   drawGui();
-  gui.setTextSize(32);
+  gui.setTextSize(max(24, ctrlPanelH * 0.045)); // Adaptive GUI font
 
   if (volSlider.isChanged) {
-    let volume = map(volSlider.val, -100, 100, 0, 1); // normalize volume to 0.0 - 1.0
-    console.log("Volume slider changed, calling sendWebSocketMessage with:", { bgmVolume: volume });
-    sendWebSocketMessage({
-      bgmVolume: volume,
-    });
+    let volume = map(volSlider.val, -100, 100, 0, 1);
+    sendWebSocketMessage({ bgmVolume: volume });
   }
 
-  if (timeSlider.isChanged) {
-    let time = map(timeSlider.val, 0, 100, 0, 1); // normalize time to 0.0 - 1.0
-    sendWebSocketMessage({
-      time: time,
-    });
-  }
-
-  // Check for changes in pollutant toggles or sliders
   for (let label of labels) {
     if (toggles[label].isChanged || sliders[label].isChanged) {
-      // Create a pollutant data object
-      const pollutantData = {
-        pollutants: {}
-      };
-
-      // Collect current state of ALL pollutants (not just the changed one)
-      // This ensures we always send complete pollutant state
+      const pollutantData = { pollutants: {} };
       for (let pollutant of labels) {
         pollutantData.pollutants[pollutant] = {
-          active: toggles[pollutant].val, // If toggle is on, active will be true
-          level: 0.5, // Default level of pollution, changeable between 0 and 1
-          volume: map(sliders[pollutant].val, 0, 100, 0, 1) // Map slider value to volume
+          active: toggles[pollutant].val,
+          level: 0.5,
+          volume: map(sliders[pollutant].val, 0, 100, 0, 1)
         };
       }
-
-      console.log("Pollutant state changed, calling sendWebSocketMessage with:", pollutantData);
-      // Send the complete pollutant data
       sendWebSocketMessage(pollutantData);
-
-      // Exit the loop after sending (to avoid multiple sends in one frame)
       break;
     }
   }
 }
 
 function initElements() {
-  let w = width;
-  let h = height;
+  let w = ctrlPanelW;
+  let h = ctrlPanelH;
 
   hkToggle = createToggle("Hong Kong", w * 0.05, h * 0.85, w * 0.4, h * 0.1);
   bkkToggle = createToggle("Bangkok", w * 0.55, h * 0.85, w * 0.4, h * 0.1);
 
   volSlider = createSliderV(
     "Volume",
-    w * 0.9,
+    w * 0.8,
     h * 0.05,
-    w * 0.05,
+    w * 0.1,
     h * 0.7,
     -100,
     100
   );
-  timeSlider = createSliderV(
-    "Time",
-    w * 0.8,
-    h * 0.05,
-    w * 0.05,
-    h * 0.7,
-    0,
-    100
-  );
 
+  volSliderlabel = createButton("Vol", w * 0.815, h * 0.78, w * 0.06, h * 0.06);
 
-  volSliderlabel = createButton("Vol", w * 0.89, h * 0.75, 60, 50);
-  timeSliderlabel = createButton("Time", w * 0.79, h * 0.75, 60, 50);
-
-
-  let elementSize = w * 0.14;
-  let padding = w * 0.13;
+  let elementSize = w * 0.13;
+  let padding = w * 0.12;
   let numCols = 3;
   let numRows = ceil(labels.length / numCols);
 
@@ -207,35 +163,19 @@ function initElements() {
   }
 }
 
-function windowResized() {
-  // Adjust canvas size if needed
-  resizeCanvas(windowWidth, windowHeight);
-
-  // Reposition the canvas on window resize
-  var x = (windowWidth - sketchCanvas.width) / 2;
-  var y = (windowHeight - sketchCanvas.height) / 2;
+function centerCanvas() {
+  let x = (windowWidth - ctrlPanelW) / 2;
+  let y = (windowHeight - ctrlPanelH) / 2;
   sketchCanvas.position(x, y);
-
-  // Reinitialize elements if required
-  initElements();
-  const canvasDiv = document.getElementById("ctrlCanvas");
-  const width = canvasDiv.offsetWidth;
-  const height = canvasDiv.offsetHeight;
-  resizeCanvas(width, height);
-  centerCanvas();
-  initElements();
 }
-
 
 function hideElements() {
   for (let label of labels) {
     toggles[label].visible = false;
     sliders[label].visible = false;
   }
-  timeSlider.visible = false;
   volSlider.visible = false;
   volSliderlabel.visible = false;
-  timeSliderlabel.visible = false;
 }
 
 function showElements() {
@@ -243,43 +183,19 @@ function showElements() {
     toggles[label].visible = true;
     sliders[label].visible = true;
   }
-  timeSlider.visible = true;
   volSlider.visible = true;
   volSliderlabel.visible = true;
-  timeSliderlabel.visible = true;
 }
 
 function touchMoved() {
   return false;
 }
 
-function setupCanvas() {
-
-  const width = 917;
-  const height = 688;
-
-  sketchCanvas = createCanvas(width, height); // Assign to global variable
-  sketchCanvas.parent("ctrlCanvas");
-
-  var x = (windowWidth - width) / 2;
-  var y = (windowHeight - height) / 2;
-  sketchCanvas.position(x, y);
-}
-
-function windowResized() {
-  sketchCanvas = createCanvas(width, height);
-  var x = (windowWidth - width) / 2;
-  var y = (windowHeight - height) / 2;
-  sketchCanvas.position(x, y);
-}
-
 function sendWebSocketMessage(data) {
   if (socket && socket.readyState === WebSocket.OPEN) {
-    console.log("Control Panel: Attempting to send:", data); // <-- Add this log
     try {
       const messageString = JSON.stringify(data);
       socket.send(messageString);
-      console.log("Control Panel: Sent OK:", messageString); // <-- Add this log
     } catch (error) {
       console.error("Control Panel: Error sending message:", error);
     }
