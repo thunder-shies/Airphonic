@@ -68,6 +68,15 @@ const CONFIG = {
     particleRate: 5,
     particleAlpha: 75,
     particleAmp: 3
+  },
+
+  no2Effect: {
+    particleCount: 50,
+    noiseScale: 0.005,
+    flowFieldScale: 50,
+    particleSpeed: 2,
+    particleSize: { min: 50, max: 100 },
+    opacity: { min: 10, max: 20 }
   }
 };
 
@@ -132,6 +141,11 @@ let o3_ozoneBursts = [];
 let co_particles = [];
 let CO_saturated = false;
 
+// --- NO₂ sketch state ---
+let no2_particles = [];
+let no2_flowField = [];
+let no2_cols, no2_rows;
+
 // Graphics buffers
 let canvasHist, mountainBuffer, circularBuffer;
 
@@ -152,6 +166,8 @@ function setup() {
   setupAudio();
   setupWebSocket();
   setupDataFetching();
+  setupNO2Effect();
+
   started = true;
 
   // --- Init O₃ effect ---
@@ -188,6 +204,10 @@ function draw() {
 
   // Display both visualizations
   image(mountainBuffer, 0, 0);
+
+  if (currentlyPlaying["NO2"] !== undefined) {
+    drawNO2Effect();
+  }
 
   if (currentlyPlaying["O3"] !== undefined) {
     drawO3Effect();
@@ -1415,7 +1435,7 @@ class COParticle {
 }
 
 function drawCOEffect() {
-  blendMode(BLEND);
+  blendMode(ADD);
   push();
   colorMode(HSB);
 
@@ -1447,6 +1467,98 @@ function drawCOEffect() {
   }
 
   CO_saturated = co_particles.length >= CONFIG.coEffect.maxParticles;
+
+  pop();
+  blendMode(BLEND);
+
+}
+
+// NO2 Effects
+function setupNO2Effect() {
+  // Initialize flow field grid
+  no2_cols = floor(width / CONFIG.no2Effect.flowFieldScale);
+  no2_rows = floor(height / CONFIG.no2Effect.flowFieldScale);
+  initNO2FlowField();
+  initNO2Particles();
+}
+
+function initNO2FlowField() {
+  no2_flowField = new Array(no2_cols * no2_rows);
+  let yoff = 0;
+  for (let y = 0; y < no2_rows; y++) {
+    let xoff = 0;
+    for (let x = 0; x < no2_cols; x++) {
+      let index = x + y * no2_cols;
+      let angle = noise(xoff, yoff) * TWO_PI * 2;
+      no2_flowField[index] = p5.Vector.fromAngle(angle);
+      xoff += CONFIG.no2Effect.noiseScale;
+    }
+    yoff += CONFIG.no2Effect.noiseScale;
+  }
+}
+
+function initNO2Particles() {
+  no2_particles = [];
+  for (let i = 0; i < CONFIG.no2Effect.particleCount; i++) {
+    no2_particles.push({
+      pos: createVector(random(width), random(height)),
+      vel: createVector(0, 0),
+      size: random(CONFIG.no2Effect.particleSize.min, CONFIG.no2Effect.particleSize.max),
+      opacity: random(CONFIG.no2Effect.opacity.min, CONFIG.no2Effect.opacity.max)
+    });
+  }
+}
+
+function drawNO2Effect() {
+  if (!currentlyPlaying["NO2"]) return;
+
+  // Update flow field based on time
+  let yoff = frameCount * 0.01;
+  for (let y = 0; y < no2_rows; y++) {
+    let xoff = frameCount * 0.01;
+    for (let x = 0; x < no2_cols; x++) {
+      let index = x + y * no2_cols;
+      let angle = noise(xoff, yoff) * TWO_PI * 2;
+      no2_flowField[index] = p5.Vector.fromAngle(angle);
+      xoff += CONFIG.no2Effect.noiseScale;
+    }
+    yoff += CONFIG.no2Effect.noiseScale;
+  }
+
+  // Get NO2 level for color intensity
+  const no2Level = currentlyPlaying["NO2"];
+  const no2Color = getPollutantColor(no2Level);
+
+  // Update and draw particles
+  push();
+  blendMode(ADD);
+  noStroke();
+
+  drawingContext.filter = 'blur(5px)';
+
+  no2_particles.forEach(particle => {
+    // Get flow field force
+    let x = floor(particle.pos.x / CONFIG.no2Effect.flowFieldScale);
+    let y = floor(particle.pos.y / CONFIG.no2Effect.flowFieldScale);
+    let index = constrain(x + y * no2_cols, 0, no2_flowField.length - 1);
+    let force = no2_flowField[index].copy();
+
+    // Apply force and update position
+    particle.vel.add(force);
+    particle.vel.limit(CONFIG.no2Effect.particleSpeed);
+    particle.pos.add(particle.vel);
+
+    // Wrap around edges
+    if (particle.pos.x < 0) particle.pos.x = width;
+    if (particle.pos.x > width) particle.pos.x = 0;
+    if (particle.pos.y < 0) particle.pos.y = height;
+    if (particle.pos.y > height) particle.pos.y = 0;
+
+    // Draw particle
+    fill(25, 34, 33, particle.opacity);
+    circle(particle.pos.x, particle.pos.y, particle.size);
+  });
+  drawingContext.filter = 'none';
 
   pop();
 }
