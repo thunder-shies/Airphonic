@@ -1,7 +1,7 @@
 
 // Configuration
-const SERVER_ADDRESS = 'ws://127.0.0.1:8080'; // Localhost for testing
-// const SERVER_ADDRESS = 'wss://airphonic-websockets.onrender.com'; // Production
+// const SERVER_ADDRESS = 'ws://127.0.0.1:8080'; // Localhost for testing
+const SERVER_ADDRESS = 'wss://airphonic-websockets.onrender.com'; // Production
 
 // Global variables
 let socket;
@@ -77,6 +77,14 @@ const CONFIG = {
     particleSpeed: 2,
     particleSize: { min: 50, max: 100 },
     opacity: { min: 10, max: 20 }
+  },
+
+  so2Effect: {
+    maxParticles: 50,
+    spawnInterval: 2,
+    particleSize: 80,
+    lifespanDecrease: 1.5,
+    velocityScale: 0.3,
   }
 };
 
@@ -105,6 +113,8 @@ let avgAmplitude = 0;
 let spectrumHist = [];
 
 // Assets files
+let so2_particleSystem;
+let so2Texture;
 let nullBGM, hkgBGM, bkkBGM;
 let fontRegular;
 let pollutantSounds = {
@@ -151,6 +161,7 @@ let canvasHist, mountainBuffer, circularBuffer;
 
 // ===== CORE P5 FUNCTIONS =====
 function preload() {
+  so2Texture = loadImage("assets/image/so2p.png");
   nullBGM = loadSound("assets/audio/bgm/bgmSilence.mp3");
   hkgBGM = loadSound("assets/audio/bgm/bgmHKG.mp3");
   bkkBGM = loadSound("assets/audio/bgm/bgmBKK.mp3");
@@ -177,6 +188,9 @@ function setup() {
   for (let i = 0; i < CONFIG.o3Effect.maxNOxParticles; i++) {
     o3_noxParticles.push(new O3_NOxParticle());
   }
+
+  const particleOrigin = createVector(0, 0); // Center of translated system
+  so2_particleSystem = new SO2ParticleSystem(particleOrigin, so2Texture);
 
 }
 
@@ -219,6 +233,10 @@ function draw() {
 
   if (currentlyPlaying["CO"] !== undefined) {
     drawCOEffect();
+  }
+
+  if (currentlyPlaying["SO2"] !== undefined) {
+    drawSO2Effect();
   }
 
   image(circularBuffer, 0, 0);
@@ -1561,4 +1579,113 @@ function drawNO2Effect() {
   drawingContext.filter = 'none';
 
   pop();
+}
+
+// SO2 Effects
+function drawSO2Effect() {
+  push(); // Isolate transformations
+  translate(width / 2, height / 2); // Center the effect
+
+  if (so2_particleSystem.particles.length < CONFIG.so2Effect.maxParticles) {
+    if (frameCount % CONFIG.so2Effect.spawnInterval === 0) {
+      let particlesToAdd = floor(map(avgAmplitude, 0, 1, 1, 2));
+      for (let i = 0; i < particlesToAdd; i++) {
+        so2_particleSystem.addParticle();
+      }
+    }
+  }
+
+  let windForce = random(-0.2, 0.2);
+  so2_particleSystem.applyForce(createVector(windForce, 0));
+  so2_particleSystem.run();
+  pop(); // Restore original transformation
+}
+
+class SO2ParticleSystem {
+  constructor(origin, textureImage) {
+    this.particles = [];
+    this.origin = origin.copy();
+    this.img = textureImage;
+  }
+
+  run() {
+    // Use direct array access for better performance
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const particle = this.particles[i];
+
+      // Update particle state
+      particle.update();
+
+      // Remove dead particles
+      if (particle.isDead()) {
+        this.particles.splice(i, 1);
+        continue;
+      }
+
+      // Render particle
+      particle.render();
+    }
+  }
+
+  applyForce(dir) {
+    // Use standard for loop instead of forEach for better performance
+    const len = this.particles.length;
+    for (let i = 0; i < len; i++) {
+      this.particles[i].applyForce(dir);
+    }
+  }
+
+  addParticle() {
+    this.particles.push(new SO2Particle(this.origin, this.img));
+  }
+}
+
+class SO2Particle {
+  constructor(pos, imageTexture) {
+    this.loc = pos.copy();
+    // Reduced velocity scale
+    this.velocity = createVector(
+      randomGaussian() * CONFIG.so2Effect.velocityScale,
+      randomGaussian() * CONFIG.so2Effect.velocityScale
+    );
+    this.acceleration = createVector();
+    this.lifespan = 200.0;
+    this.texture = imageTexture;
+
+    // Pre-calculate color once instead of every frame
+    this.color = color(
+      random(0, 30),    // Hue: yellow-green
+      random(70, 90),   // Saturation
+      random(80, 100),  // Brightness
+      random(50, 100)   // Alpha
+    );
+  }
+
+  render() {
+    // Removed push/pop for better performance
+    imageMode(CENTER);
+    tint(this.color, this.lifespan);
+    image(
+      this.texture,
+      this.loc.x,
+      this.loc.y,
+      CONFIG.so2Effect.particleSize,
+      CONFIG.so2Effect.particleSize
+    );
+  }
+
+  applyForce(f) {
+    this.acceleration.add(f);
+  }
+
+  isDead() {
+    return this.lifespan <= 0.0;
+  }
+
+  update() {
+    this.velocity.add(this.acceleration);
+    this.loc.add(this.velocity);
+    this.lifespan -= CONFIG.so2Effect.lifespanDecrease;
+    this.acceleration.mult(0);
+  }
 }
