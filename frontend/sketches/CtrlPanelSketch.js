@@ -1,5 +1,5 @@
-const SERVER_ADDRESS = 'wss://airphonic-websockets.onrender.com';
-// const SERVER_ADDRESS = 'ws://127.0.0.1:8080'; // Localhost for testing
+// const SERVER_ADDRESS = 'wss://airphonic-websockets.onrender.com';
+const SERVER_ADDRESS = 'ws://127.0.0.1:8080'; // Localhost for testing
 let socket;
 let gui;
 let sketchCanvas; // Declare at top for global access

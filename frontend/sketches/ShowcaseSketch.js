@@ -1,7 +1,7 @@
 
 // Configuration
-// const SERVER_ADDRESS = 'ws://127.0.0.1:8080'; // Localhost for testing
-const SERVER_ADDRESS = 'wss://airphonic-websockets.onrender.com'; // Production
+const SERVER_ADDRESS = 'ws://127.0.0.1:8080'; // Localhost for testing
+// const SERVER_ADDRESS = 'wss://airphonic-websockets.onrender.com'; // Production
 
 // Global variables
 let socket;
@@ -59,6 +59,15 @@ const CONFIG = {
     raySpeed: { min: 3, max: 5 },
     rayThickness: { min: 5, max: 30 },
     rayBrightness: { min: 50, max: 100 }
+  },
+
+  coEffect: {
+    maxParticles: 150,
+    spawnInterval: 10,
+    spawnTimer: 0,
+    particleRate: 5,
+    particleAlpha: 75,
+    particleAmp: 3
   }
 };
 
@@ -119,6 +128,9 @@ let o3_uvRays = [];
 let o3_noxParticles = [];
 let o3_ozoneBursts = [];
 
+// --- CO sketch state ---
+let co_particles = [];
+let CO_saturated = false;
 
 // Graphics buffers
 let canvasHist, mountainBuffer, circularBuffer;
@@ -177,12 +189,16 @@ function draw() {
   // Display both visualizations
   image(mountainBuffer, 0, 0);
 
+  if (currentlyPlaying["O3"] !== undefined) {
+    drawO3Effect();
+  }
+
   if (currentlyPlaying["PM25"] !== undefined || currentlyPlaying["PM10"] !== undefined) {
     drawPMParticles();
   }
 
-  if (currentlyPlaying["O3"] !== undefined) {
-    drawO3Sketch();
+  if (currentlyPlaying["CO"] !== undefined) {
+    drawCOEffect();
   }
 
   image(circularBuffer, 0, 0);
@@ -949,8 +965,18 @@ function displayAirInfo() {
 
   push();
   textFont(fontRegular);
-  fill(255);
   textSize(FONT_SIZE);
+  colorMode(HSB);
+
+  // Pollutant thresholds for color mapping
+  const thresholds = {
+    "PM₂.₅": [12.0, 35.4, 55.4, 150.4, 250.4],
+    "PM₁₀": [54.0, 154.0, 254.0, 354.0, 424.0],
+    "SO₂": [91.7, 196.5, 484.7, 796.5, 1582.5],
+    "NO₂": [100, 188, 676, 1220, 2346],
+    "O₃": [122, 147, 186, 225, 459],
+    "CO": [5037, 10772, 14201, 17638, 34814]
+  };
 
   // Define pollutant data structure
   const pollutants = [
@@ -966,6 +992,11 @@ function displayAirInfo() {
   let yPos = height - MARGIN;
   pollutants.forEach(({ name, key }) => {
     const value = aqData[key];
+    const level = getPollutantLevel(value, thresholds[name]);
+    const color = getPollutantColor(level);
+
+    // Set the color for this pollutant text
+    fill(color[0], color[1], color[2]);
     text(`${name}: ${value} μg/m³`, MARGIN, yPos);
     yPos -= SPACING;
   });
@@ -987,6 +1018,31 @@ function getAQIColor(aqi) {
     if (aqi <= threshold) return AQI_COLORS[threshold];
   }
   return AQI_COLORS.max;
+}
+
+function getPollutantLevel(value, thresholds) {
+  if (value === undefined || value === null) return 0;
+
+  for (let i = 0; i < thresholds.length; i++) {
+    if (value <= thresholds[i]) {
+      return i;
+    }
+  }
+  return 5; // Maximum level if above all thresholds
+}
+
+function getPollutantColor(level) {
+  // Using the same color scheme as AQI colors
+  const colors = {
+    0: [120, 100, 80],  // Good - Green
+    1: [60, 100, 100],  // Moderate - Yellow
+    2: [30, 100, 100],  // Unhealthy for Sensitive Groups - Orange
+    3: [0, 100, 100],   // Unhealthy - Red
+    4: [270, 60, 60],   // Very Unhealthy - Purple
+    5: [345, 100, 50]   // Hazardous - Maroon
+  };
+
+  return colors[level] || colors[5];
 }
 
 function displayLoadingScreen() {
@@ -1262,7 +1318,7 @@ class O3_OzoneBurst {
   }
 }
 
-function drawO3Sketch() {
+function drawO3Effect() {
   push();
   colorMode(HSB, 360, 100, 100, 255);
 
@@ -1297,6 +1353,100 @@ function drawO3Sketch() {
       o3_ozoneBursts.splice(i, 1);
     }
   }
+
+  pop();
+}
+
+// CO Effects
+class COParticle {
+  constructor(x, y, r, a) {
+    this.location = createVector(x, y);
+    this.velocity = p5.Vector.random2D().mult(0.5);
+    this.acceleration = createVector();
+    this.alpha = this.palpha = a;
+    this.amp = CONFIG.coEffect.particleAmp;
+    this.rate = r;
+
+    // Get current CO level and color
+    const coValue = aqData["CO"];
+    const coThresholds = [5037, 10772, 14201, 17638, 34814];
+    const level = getPollutantLevel(coValue, coThresholds);
+    const color = getPollutantColor(level);
+    this.color = color;
+  }
+
+  update(p) {
+    // Perlin noise movement
+    this.acceleration.add(
+      createVector(
+        noise(this.location.x) * 2 - 1,
+        noise(this.location.y) * 2 - 1
+      )
+    );
+    this.velocity.add(this.acceleration);
+    this.acceleration.set(0, 0);
+    this.location.add(this.velocity);
+    this.alpha -= this.rate;
+
+    // Recursive spawn with reduced alpha for child particles
+    if (this.alpha <= this.palpha * 0.25 && this.palpha > 10) {
+      p.push(
+        new COParticle(
+          this.location.x,
+          this.location.y,
+          this.rate * 0.25,
+          this.palpha * 0.3  // Reduced from 0.5 to 0.3 for more transparency
+        )
+      );
+    }
+  }
+
+  show() {
+    noStroke();
+    // Use the color based on pollution level with reduced opacity
+    fill(
+      this.color[0],     // Hue
+      this.color[1],     // Saturation
+      this.color[2],     // Brightness
+      this.alpha * 0.5   // Reduced alpha by 50% for more transparency
+    );
+    ellipse(this.location.x, this.location.y, this.amp);
+  }
+}
+
+function drawCOEffect() {
+  blendMode(BLEND);
+  push();
+  colorMode(HSB);
+
+  CONFIG.coEffect.spawnTimer++;
+
+  // Spawn new particles at intervals
+  if (CONFIG.coEffect.spawnTimer % CONFIG.coEffect.spawnInterval === 0 &&
+    co_particles.length < CONFIG.coEffect.maxParticles) {
+    let x = random(width);
+    let y = random(height);
+    co_particles.push(
+      new COParticle(
+        x,
+        y,
+        CONFIG.coEffect.particleRate,
+        CONFIG.coEffect.particleAlpha
+      )
+    );
+  }
+
+  // Update and draw particles
+  for (let i = co_particles.length - 1; i >= 0; i--) {
+    co_particles[i].update(co_particles);
+    co_particles[i].show();
+
+    if (co_particles[i].alpha <= 2) {
+      co_particles.splice(i, 1);
+    }
+  }
+
+  CO_saturated = co_particles.length >= CONFIG.coEffect.maxParticles;
 
   pop();
 }
