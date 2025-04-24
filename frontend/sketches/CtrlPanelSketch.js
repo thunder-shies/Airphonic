@@ -28,6 +28,10 @@ function getResponsiveSize() {
   return { w: round(w), h: round(h) };
 }
 
+function preload() {
+  font = loadFont("assets/font/Quadaptor.otf");
+}
+
 function setup() {
   // Responsive sizing
   ({ w: ctrlPanelW, h: ctrlPanelH } = getResponsiveSize());
@@ -38,6 +42,7 @@ function setup() {
 
   gui = createGui();
   gui.loadStyle("Gray");
+  // gui.setFont(font);
   initElements();
 
   hideElements();
@@ -139,7 +144,6 @@ function initElements() {
   let h = ctrlPanelH;
 
   gui.setTextSize(max(24, ctrlPanelH * 0.045));
-
   hkToggle = createToggle("Hong Kong", w * 0.05, h * 0.85, w * 0.4, h * 0.1);
   bkkToggle = createToggle("Bangkok", w * 0.55, h * 0.85, w * 0.4, h * 0.1);
 

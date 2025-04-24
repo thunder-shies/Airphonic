@@ -158,6 +158,7 @@ let no2_cols, no2_rows;
 
 // Graphics buffers
 let canvasHist, mountainBuffer, circularBuffer;
+let coBuffer, o3Buffer;
 
 // ===== CORE P5 FUNCTIONS =====
 function preload() {
@@ -180,6 +181,9 @@ function setup() {
   setupNO2Effect();
 
   started = true;
+
+  coBuffer = createGraphics(width, height);
+  o3Buffer = createGraphics(width, height);
 
   // --- Init O₃ effect ---
   for (let i = 0; i < CONFIG.o3Effect.maxUVRays; i++) {
@@ -218,13 +222,15 @@ function draw() {
 
   // Display both visualizations
   image(mountainBuffer, 0, 0);
+  coBuffer.clear();
+  o3Buffer.clear();
 
   if (currentlyPlaying["NO2"] !== undefined) {
     drawNO2Effect();
   }
 
   if (currentlyPlaying["O3"] !== undefined) {
-    drawO3Effect();
+    drawO3Effect(o3Buffer);
   }
 
   if (currentlyPlaying["PM25"] !== undefined || currentlyPlaying["PM10"] !== undefined) {
@@ -232,7 +238,7 @@ function draw() {
   }
 
   if (currentlyPlaying["CO"] !== undefined) {
-    drawCOEffect();
+    drawCOEffect(coBuffer);
   }
 
   if (currentlyPlaying["SO2"] !== undefined) {
@@ -240,6 +246,8 @@ function draw() {
   }
 
   image(circularBuffer, 0, 0);
+  image(o3Buffer, 0, 0);
+  image(coBuffer, 0, 0);
 
   displayAirInfo();
   displayTime();
@@ -1356,9 +1364,9 @@ class O3_OzoneBurst {
   }
 }
 
-function drawO3Effect() {
-  push();
-  colorMode(HSB, 360, 100, 100, 255);
+function drawO3Effect(buffer) {
+  buffer.push();
+  buffer.colorMode(HSB, 360, 100, 100, 255);
 
   // Apply blur effect to UV rays
   drawingContext.filter = 'blur(2px)';
@@ -1392,7 +1400,7 @@ function drawO3Effect() {
     }
   }
 
-  pop();
+  buffer.pop();
 }
 
 // CO Effects
@@ -1452,10 +1460,10 @@ class COParticle {
   }
 }
 
-function drawCOEffect() {
-  blendMode(ADD);
-  push();
-  colorMode(HSB);
+function drawCOEffect(buffer) {
+  buffer.blendMode(ADD);
+  buffer.push();
+  buffer.colorMode(HSB);
 
   CONFIG.coEffect.spawnTimer++;
 
@@ -1486,8 +1494,8 @@ function drawCOEffect() {
 
   CO_saturated = co_particles.length >= CONFIG.coEffect.maxParticles;
 
-  pop();
-  blendMode(BLEND);
+  buffer.pop();
+  buffer.blendMode(BLEND);
 
 }
 
