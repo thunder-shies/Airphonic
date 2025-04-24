@@ -14,9 +14,12 @@ let canvasAspect = 917 / 688;
 let ctrlPanelW, ctrlPanelH;
 
 function getResponsiveSize() {
-  let margin = 50;
-  let w = windowWidth - margin * 2;
-  let h = windowHeight - margin * 2;
+  let margin = 40;
+  let minW = 420;  // Minimum canvas width
+  let minH = 340;  // Minimum canvas height
+  let w = max(windowWidth - margin * 2, minW);
+  let h = max(windowHeight - margin * 2, minH);
+
   if (w / h > canvasAspect) {
     w = h * canvasAspect;
   } else {
@@ -79,8 +82,10 @@ function setup() {
 }
 
 function setLabelStyles() {
-  // Use a dynamic text size based on canvas for labels
+  // Use a dynamic text size based on canvas for controls and volume label
   let dynTextSize = max(18, ctrlPanelH * 0.03);
+
+  // Volume slider label
   volSliderlabel.setStyle({
     fillBg: color("#000000"),
     fillBgHover: color("#000000"),
@@ -91,6 +96,16 @@ function setLabelStyles() {
     fillLabelActive: color("#FFFFFF"),
     textSize: dynTextSize,
   });
+
+  // Toggle and slider labels
+  for (let label of labels) {
+    if (toggles[label] && toggles[label].setStyle) {
+      toggles[label].setStyle({ textSize: dynTextSize });
+    }
+    if (sliders[label] && sliders[label].setStyle) {
+      sliders[label].setStyle({ textSize: dynTextSize });
+    }
+  }
 }
 
 function draw() {
@@ -123,6 +138,8 @@ function initElements() {
   let w = ctrlPanelW;
   let h = ctrlPanelH;
 
+  gui.setTextSize(max(24, ctrlPanelH * 0.045));
+
   hkToggle = createToggle("Hong Kong", w * 0.05, h * 0.85, w * 0.4, h * 0.1);
   bkkToggle = createToggle("Bangkok", w * 0.55, h * 0.85, w * 0.4, h * 0.1);
 
@@ -138,9 +155,14 @@ function initElements() {
 
   volSliderlabel = createButton("Vol", w * 0.815, h * 0.78, w * 0.06, h * 0.06);
 
-  let elementSize = w * 0.13;
-  let padding = w * 0.12;
+  // Determine columns based on width
+  let minElementSize = 60;
+  let minPadding = 15;
+  let elementSize = max(minElementSize, w * 0.13);
+  let padding = max(minPadding, w * 0.12);
+
   let numCols = 3;
+  if (w < 420) numCols = 2;
   let numRows = ceil(labels.length / numCols);
 
   for (let i = 0; i < labels.length; i++) {
