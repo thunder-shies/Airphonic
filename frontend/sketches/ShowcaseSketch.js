@@ -249,6 +249,7 @@ function draw() {
   image(o3Buffer, 0, 0);
   image(coBuffer, 0, 0);
 
+  displayCurrentCity();
   displayAirInfo();
   displayTime();
 }
@@ -1004,6 +1005,21 @@ function isParticleOffscreen(p) {
 
 
 // ===== DISPLAY FUNCTIONS =====
+function displayCurrentCity() {
+  const FONT_SIZE = 32 * projScale;
+  const MARGIN = 25;
+
+  push();
+  textFont(fontRegular);
+  textAlign(LEFT, TOP);
+  textSize(FONT_SIZE);
+  colorMode(HSB);
+  fill(0, 0, 100);
+
+  let displayText = currentCity === "None" ? "No City Selected" : `City: ${currentCity}`;
+  text(displayText, MARGIN, MARGIN); // Draw near top-left
+  pop();
+}
 function displayAirInfo() {
   const FONT_SIZE = 32 * projScale;
   const SPACING = 40 * projScale;

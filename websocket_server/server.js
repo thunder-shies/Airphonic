@@ -1,19 +1,29 @@
 const WebSocket = require('ws');
 
-// Use the PORT provided by Render or local 8080
 const PORT = process.env.PORT || 8080;
 const wss = new WebSocket.Server({ port: PORT });
 
 const clients = new Set();
 console.log(`WebSocket server started on port ${PORT}`);
 
+// Heartbeat settings
+const HEARTBEAT_INTERVAL = 30000; // ms
+
+function noop() { }
+
+function heartbeat() {
+    this.isAlive = true;
+}
+
 wss.on('connection', (ws) => {
-    console.log(`Client connected. Total clients: ${clients.size}`);
+    ws.isAlive = true;
+    ws.on('pong', heartbeat);
+
     clients.add(ws);
+    console.log(`Client connected. Total clients: ${clients.size}`);
 
     ws.on('message', (message) => {
-        // console.log('Server Received:', message.toString()); // <-- Check this log
-        // Broadcast to all *other* connected clients
+        // Broadcast to all other connected clients
         clients.forEach((client) => {
             if (client !== ws && client.readyState === WebSocket.OPEN) {
                 try {
@@ -26,12 +36,29 @@ wss.on('connection', (ws) => {
     });
 
     ws.on('close', () => {
-        console.log(`Client disconnected. Total clients: ${clients.size}`);
         clients.delete(ws);
+        console.log(`Client disconnected. Total clients: ${clients.size}`);
     });
 
     ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
         clients.delete(ws);
+        console.error('WebSocket error:', error);
     });
+});
+
+// Heartbeat interval to clean up dead clients
+const interval = setInterval(() => {
+    wss.clients.forEach((ws) => {
+        if (ws.isAlive === false) {
+            clients.delete(ws);
+            return ws.terminate();
+        }
+
+        ws.isAlive = false;
+        ws.ping(noop);
+    });
+}, HEARTBEAT_INTERVAL);
+
+wss.on('close', function close() {
+    clearInterval(interval);
 });
