@@ -174,6 +174,7 @@ function preload() {
 
 function setup() {
   setupCanvas();
+  noCursor();
   setupBuffers();
   setupAudio();
   setupWebSocket();
