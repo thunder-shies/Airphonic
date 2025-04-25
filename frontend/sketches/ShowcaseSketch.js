@@ -163,7 +163,7 @@ let coBuffer, o3Buffer;
 // ===== CORE P5 FUNCTIONS =====
 function preload() {
   so2Texture = loadImage("assets/image/so2p.png");
-  nullBGM = loadSound("assets/audio/bgm/bgmSilence.mp3");
+  nullBGM = loadSound("assets/audio/bgm/bgm.wav");
   hkgBGM = loadSound("assets/audio/bgm/bgmHKG.mp3");
   bkkBGM = loadSound("assets/audio/bgm/bgmBKK.mp3");
 
@@ -939,8 +939,8 @@ function drawCenterCircle(buffer, aqiHue, aqiSaturation, aqiBrightness) {
   buffer.textFont(fontRegular);
   buffer.fill(0);
   buffer.textAlign(CENTER, CENTER);
-  buffer.textSize(24 * projScale);
-  buffer.text(aqData["AQI (US)"], 0, 0);
+  buffer.textSize(32 * projScale);
+  buffer.text(aqData["AQI (US)"], 0, -3);
 }
 
 // ===== PARTICLE SYSTEM =====
