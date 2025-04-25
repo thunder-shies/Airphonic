@@ -606,6 +606,16 @@ async function handleCityChange(newCity) {
 
   if (newCity === "None") {
     stopAllPollutantSounds();
+    aqData = {
+      "AQI (US)": 0,
+      "PM₂.₅": 0,
+      "PM₁₀": 0,
+      "SO₂": 0,
+      "NO₂": 0,
+      "O₃": 0,
+      "CO": 0
+    };
+    return;
   }
 
   // Select the new song
